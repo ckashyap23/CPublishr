@@ -1,0 +1,11 @@
+# Byte-compiled
+__pycache__/
+*.py[cod]
+
+# venv
+.venv/
+backend/.venv/
+.venv-ui/
+
+# env
+.env
