@@ -74,7 +74,7 @@ Endpoint:
 Flow:
 1. Load requested version from `content_versions`.
 2. Run Node 3 once.
-3. Persist new `ContentVersion` immediately.
+3. Persist new `ContentVersion` immediately with `version_kind="editorial"`.
 
 ### Mode B: Iterative Session Editorial
 
@@ -100,6 +100,9 @@ Required output keys:
 - `draft_version: int`
 - `updated_master_document: str`
 - `change_log: list[str]`
+
+Note:
+- persisted editorial version number is assigned by repository next-version logic (global project sequence).
 
 ### Session API Schemas (workflow.py)
 Keep fields stable for:

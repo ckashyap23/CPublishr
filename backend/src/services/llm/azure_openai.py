@@ -19,7 +19,7 @@ class AzureOpenAIClient:
     def enabled(self) -> bool:
         return bool(self.endpoint and self.deployment and self.api_key)
 
-    def chat(self, *, system_prompt: str, user_prompt: str, temperature: float = 0.3) -> str:
+    def chat(self, *, system_prompt: str, user_prompt: str, temperature: float = 0.3, max_tokens: int = 1200) -> str:
         if not self.enabled:
             raise RuntimeError("Azure OpenAI is not configured")
 
@@ -37,7 +37,7 @@ class AzureOpenAIClient:
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": temperature,
-            "max_tokens": 1200,
+            "max_tokens": int(max_tokens),
         }
 
         with httpx.Client(timeout=45.0) as client:

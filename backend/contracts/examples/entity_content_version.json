@@ -1,1 +1,8 @@
-{"version_id":"ver_1","project_id":"proj_001","version_number":1,"content":"# doc"}
+{
+  "version_id": "ver_1",
+  "project_id": "proj_001",
+  "version_number": 1,
+  "version_kind": "base",
+  "variant_label": null,
+  "content": "# doc"
+}

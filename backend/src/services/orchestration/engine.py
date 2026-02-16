@@ -63,7 +63,22 @@ class OrchestrationEngine:
             project_id=payload.project_id,
             content=master_doc,
             version_number=self.content.next_version_number(payload.project_id),
+            version_kind="base",
+            variant_label=None,
         )
+        for mv in n2.output_payload.get("master_variants") or []:
+            variant_doc = str(mv.get("master_document") or "").strip()
+            if not variant_doc:
+                continue
+            variant_label = str(mv.get("label") or "").strip() or None
+            self.content.create_version(
+                version_id=new_id("ver"),
+                project_id=payload.project_id,
+                content=variant_doc,
+                version_number=self.content.next_version_number(payload.project_id),
+                version_kind="variant",
+                variant_label=variant_label,
+            )
 
         bundle = (n0.output_payload.get("context_bundle") or {}) | {
             "structure_outline": n2.output_payload.get("structure_outline") or [],
@@ -99,15 +114,23 @@ class OrchestrationEngine:
             state={"current_master_document": current.content},
         )
         res = self.node3.run(ctx)
-        EditorialResponse.model_validate(res.output_payload)
+        validated = EditorialResponse.model_validate(res.output_payload)
+        next_version = self.content.next_version_number(payload.project_id)
+        inherited_variant_label = current.variant_label if current.version_kind == "variant" else None
 
         self.content.create_version(
             version_id=new_id("ver"),
             project_id=payload.project_id,
-            content=res.output_payload["updated_master_document"],
-            version_number=int(res.output_payload["draft_version"]),
+            content=validated.updated_master_document,
+            version_number=next_version,
+            version_kind="editorial",
+            variant_label=inherited_variant_label,
         )
-        return EditorialResponse.model_validate(res.output_payload)
+        return EditorialResponse(
+            draft_version=next_version,
+            updated_master_document=validated.updated_master_document,
+            change_log=validated.change_log,
+        )
 
     def start_editorial_session(self, *, project_id: str, current_version: int, user_comment: str) -> tuple[str, EditorialResponse, int]:
         current = self.content.get_version_by_number(project_id, current_version)
@@ -174,6 +197,8 @@ class OrchestrationEngine:
             project_id=session.project_id,
             content=session.working_content,
             version_number=next_version,
+            version_kind="editorial",
+            variant_label=None,
         )
         self.editorial_sessions.finalize(session_id)
 

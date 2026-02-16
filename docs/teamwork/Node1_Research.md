@@ -1,69 +1,49 @@
 # Node1 Research - Team Handoff Guide
 
-This document defines how to implement and evolve Node 1 (Research) without breaking downstream nodes (especially Node 2).
+This document defines how to evolve Node 1 (Research) without breaking downstream nodes.
 
 ## Goal
 
-Own the full logic for research generation while keeping input/output contracts stable so parallel backend work can continue safely.
+Own research generation logic while keeping input/output contracts stable for parallel work.
 
-Node 1 can include:
-- Multiple SERP/API calls
-- Source filtering
-- Deduplication
-- Re-ranking
-- Heuristic or LLM-assisted summarization
-- Contrarian angle generation
+## Endpoint Entry Points
 
-## Node 0 Input Schema (Latest)
+- Preferred isolated testing endpoint: `POST /api/v1/workflows/nodes/research`
+  - Body: `{ "topic": TopicInitializationRequest, "persist_context": bool }`
+- Existing project-based endpoint: `GET /api/v1/workflows/nodes/research/{project_id}`
 
-Required:
-- `topic_title`
-- `core_idea`
-- `tone_preference`
-- `distribution_targets`
+Important:
+- `POST /api/v1/projects/` for an existing `project_id` resets prior project-scoped rows for that project before saving fresh Node 0 context.
 
-Optional:
-- `user_content`
-- `target_audience`
-- `content_depth`
+## Contract Rules
 
-## Non-Negotiable Contract Rule
-
-Node 1 output schema must remain exactly:
-
+Node 1 output must stay exactly:
 - `research_summary: string`
 - `emerging_tools: string[]`
 - `recent_discussions: string[]`
 - `key_insights: string[]`
 - `contrarian_angles: string[]`
 
-Do not change `backend/src/contracts/prd.py` for Node 1 work unless there is an explicit cross-team schema change decision.
+Do not change Node 1 contract fields in `backend/src/contracts/prd.py` unless coordinated.
 
-## Files You Should Change
+## Files To Change
 
 Primary:
 - `backend/src/services/orchestration/nodes/research_trends.py`
 
-Optional shared helper changes:
-- `backend/src/services/llm/azure_openai.py` (if common request/parsing helpers are needed)
-
-Recommended new internal modules (safe to add):
+Optional internal modules:
 - `backend/src/services/research/serp_client.py`
 - `backend/src/services/research/reranker.py`
 - `backend/src/services/research/pipeline.py`
-- `backend/src/services/research/models.py` (internal-only typed structures)
 
-Usually avoid changing:
+Avoid changing orchestration wiring unless required:
 - `backend/src/services/orchestration/engine.py`
 
-Only touch engine if absolutely needed for dependency wiring, and keep execution order unchanged.
+## Input Boundary
 
-## Input Boundary (What Node 1 Receives)
+Node 1 reads from `context.state["context_bundle"]`.
 
-Node 1 reads from:
-- `context.state["context_bundle"]`
-
-Useful fields available:
+Expected available fields:
 - `topic_title`
 - `normalized_topic`
 - `core_idea`
@@ -73,11 +53,9 @@ Useful fields available:
 - `tone_preference`
 - `distribution_targets`
 
-Treat missing fields defensively with defaults.
+Use defensive defaults for missing values.
 
-### Sample Node 0 Output (Use This As Input Fixture)
-
-Node 1 typically receives this through `context.state["context_bundle"]`:
+### Sample Node 0 Output Fixture
 
 ```json
 {
@@ -87,7 +65,7 @@ Node 1 typically receives this through `context.state["context_bundle"]`:
     "topic_title": "Multi-Agent AI Content Orchestration",
     "normalized_topic": "multi-agent ai content orchestration",
     "core_idea": "Generate one canonical master document, then adapt packaging per platform.",
-    "user_content": "Imagine your content as a movie script: you write one master doc, and a crew of AI “agents” turns it into trailers, posters, and behind-the-scenes clips—automatically. One agent makes a punchy LinkedIn post, another crafts an Instagram carousel, a third writes a Twitter/X thread, and a fourth adapts it into a YouTube short script. Same core story, different costumes, different stage. The fun part? You stop rewriting from scratch and start “directing” the message—while your agents handle the platform-specific polish.",
+    "user_content": "Imagine your content as a movie script: you write one master doc, and a crew of AI \"agents\" turns it into trailers, posters, and behind-the-scenes clips automatically. One agent makes a punchy LinkedIn post, another crafts an Instagram carousel, a third writes a Twitter/X thread, and a fourth adapts it into a YouTube short script. Same core story, different costumes, different stage. The fun part? You stop rewriting from scratch and start directing the message while your agents handle the platform-specific polish.",
     "target_audience": "builders",
     "content_depth": "intermediate",
     "tone_preference": "professional",
@@ -96,15 +74,9 @@ Node 1 typically receives this through `context.state["context_bundle"]`:
 }
 ```
 
-When testing Node 1 in isolation, you can set:
+## Output Boundary
 
-```python
-context.state["context_bundle"] = SAMPLE["context_bundle"]
-```
-
-## Output Boundary (What Node 1 Must Return)
-
-Inside `ResearchTrendsNode.run(...)`, always return:
+Node 1 must return:
 
 ```python
 NodeExecutionResult(
@@ -125,61 +97,30 @@ And keep:
 context.state["research"] = output
 ```
 
-This is required for Node 2 compatibility.
+## Implementation Pattern
 
-## Recommended Implementation Pattern
+1. Gather candidates from 2-3 sources.
+2. Normalize to one internal shape.
+3. Filter and dedupe low-signal items.
+4. Rank deterministically first; optional LLM rerank second.
+5. Synthesize contract output and validate before return.
 
-1. Gather candidates
-- Query 2-3 sources (SERP/news/docs/community APIs).
-- Normalize into a common internal record format.
-
-2. Filter and dedupe
-- Drop low-signal or duplicate entries.
-- Keep only recent/relevant records.
-
-3. Rank
-- Rank with deterministic heuristics first (recency, source quality, topic match).
-- Optionally add LLM reranking after deterministic shortlist.
-
-4. Synthesize contract output
-- Build concise summary + structured lists.
-- Keep list sizes bounded and stable (example: 3-7 items each).
-
-5. Validate before returning
-- Call `ResearchTrendResponse.model_validate(output)` in-node before return (recommended guard).
-
-## Coding Guidelines
-
-- Keep external API logic isolated under `services/research/*`.
-- Keep `research_trends.py` as orchestrator/composer only.
-- Handle API failures gracefully with fallback output.
-- Avoid leaking provider-specific response shapes outside `services/research/*`.
-- Log useful diagnostics, but do not log secrets.
+Recommended validation:
+- `ResearchTrendResponse.model_validate(output)`
 
 ## Testing Checklist
 
 Minimum:
-- Node returns valid contract shape even on upstream API failures.
-- Output is deterministic enough for repeatable tests (or mock external calls).
+- Valid output shape even if external APIs fail.
+- Deterministic enough behavior for repeatable tests (or mocks).
 
-Recommended tests to add:
-- Unit test for ranking/dedup logic.
-- Unit test for fallback behavior when external APIs fail.
-- Unit test that validates final output against `ResearchTrendResponse`.
+Recommended:
+- Unit tests for dedup/ranking.
+- Unit tests for fallback behavior.
+- Contract validation tests.
 
-Existing contract guard:
-- `backend/tests/unit/test_prd_contract_examples.py`
+## Done Criteria
 
-## Coordination Rules (So Node 2 work is not blocked)
-
-- Do not rename/remove required output keys.
-- Do not change data types for output keys.
-- Do not change how Node 1 writes to `context.state["research"]`.
-- If you believe schema must change, raise a cross-team change request first.
-
-## Done Criteria for Node 1 Owner
-
-- Research logic is modularized and isolated from Node 2.
-- Node 1 output passes `ResearchTrendResponse` validation.
-- Node 2 runs unchanged and consumes `context.state["research"]` successfully.
-- External failures degrade gracefully (fallback output still valid).
+- Output contract unchanged and valid.
+- Node 2 consumes `context.state["research"]` unchanged.
+- External failures degrade gracefully with valid fallback output.

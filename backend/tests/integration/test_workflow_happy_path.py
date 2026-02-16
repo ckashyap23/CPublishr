@@ -44,8 +44,26 @@ def test_happy_path_topic_to_outputs_and_editorial_and_publish_job() -> None:
     assert r.status_code == 200
     assert "research_summary" in r.json()
 
+    # Node 1 (POST, payload-driven)
+    r = client.post("/api/v1/workflows/nodes/research", json={"topic": node0_payload, "persist_context": True})
+    assert r.status_code == 200
+    assert "research_summary" in r.json()
+
     # Node 2
     r = client.get(f"/api/v1/workflows/nodes/master/{project_id}")
+    assert r.status_code == 200
+    assert "master_document" in r.json()
+    assert "master_variants" in r.json()
+
+    # Node 2 (POST, payload-driven)
+    r = client.post(
+        "/api/v1/workflows/nodes/master",
+        json={
+            "topic": node0_payload,
+            "persist_context": True,
+            "persist_versions": True,
+        },
+    )
     assert r.status_code == 200
     assert "master_document" in r.json()
 
@@ -55,6 +73,15 @@ def test_happy_path_topic_to_outputs_and_editorial_and_publish_job() -> None:
     versions = r.json()["versions"]
     assert len(versions) >= 1
     assert versions[-1]["content"]
+    assert "version_kind" in versions[-1]
+    assert "variant_label" in versions[-1]
+
+    # Versions by kind
+    r = client.get(f"/api/v1/versions/{project_id}/base")
+    assert r.status_code == 200
+    base_versions = r.json()["versions"]
+    assert len(base_versions) >= 1
+    assert all(v["version_kind"] == "base" for v in base_versions)
 
     # Full workflow run (uses stored Node 0 bundle)
     r = client.post("/api/v1/workflows/runs", json={"project_id": project_id})
@@ -71,8 +98,12 @@ def test_happy_path_topic_to_outputs_and_editorial_and_publish_job() -> None:
     # content is stored as JSON string
     json.loads(outputs[0]["content"])
 
-    # Editorial (Node 3) based on latest version number
-    latest_version = versions[-1]["version_number"]
+    # Editorial (Node 3) based on latest version number at call time
+    latest_now = client.get(f"/api/v1/versions/{project_id}")
+    assert latest_now.status_code == 200
+    latest_list = latest_now.json()["versions"]
+    assert len(latest_list) >= 1
+    latest_version = latest_list[-1]["version_number"]
     editorial_payload = {
         "project_id": project_id,
         "current_version": latest_version,

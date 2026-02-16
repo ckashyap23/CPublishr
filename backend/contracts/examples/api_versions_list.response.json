@@ -1,1 +1,21 @@
-{"project_id":"proj_001","versions":[{"version_id":"ver_1","project_id":"proj_001","version_number":1,"content":"# doc"}]}
+{
+  "project_id": "proj_001",
+  "versions": [
+    {
+      "version_id": "ver_1",
+      "project_id": "proj_001",
+      "version_number": 1,
+      "version_kind": "base",
+      "variant_label": null,
+      "content": "# doc"
+    },
+    {
+      "version_id": "ver_2",
+      "project_id": "proj_001",
+      "version_number": 2,
+      "version_kind": "variant",
+      "variant_label": "Balanced (50/50) - Problem/Solution",
+      "content": "# variant doc"
+    }
+  ]
+}

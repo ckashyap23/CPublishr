@@ -6,7 +6,9 @@ This is a small Streamlit app for manually testing the FastAPI backend endpoints
 
 - A **Curl-aligned Test Flow** tab that matches the common manual test sequence:
   - `GET /healthz`
-  - `POST /api/v1/projects/`
+  - `POST /api/v1/projects/` (re-initializing the same `project_id` resets prior project-scoped data)
+  - `POST /api/v1/workflows/nodes/research`
+  - `POST /api/v1/workflows/nodes/master`
   - `POST /api/v1/workflows/runs`
   - Editorial session flow:
     - `POST /api/v1/workflows/nodes/editorial/session/start`
@@ -38,6 +40,6 @@ cd C:\Cursor_Github\CPublishr
 ```
 
 3) In the Streamlit UI, set **Backend base URL** to:
-- `http://127.0.0.1:8000`
+- whatever port you started uvicorn on (example: `http://127.0.0.1:8000` or `http://127.0.0.1:8010`)
 
 

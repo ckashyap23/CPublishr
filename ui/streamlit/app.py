@@ -213,6 +213,82 @@ def _render_latest_version_pretty(version_entity: dict[str, Any]) -> None:
         st.code(content if isinstance(content, str) else _safe_json_dumps(content))
 
 
+def _render_versions_list_pretty(payload: dict[str, Any]) -> None:
+    st.markdown("#### Versions")
+    versions = payload.get("versions") or []
+    if not isinstance(versions, list) or not versions:
+        st.caption("No versions found for project.")
+        return
+
+    # Build a stable view of versions
+    versions_sorted = sorted(
+        [v for v in versions if isinstance(v, dict)],
+        key=lambda v: int(v.get("version_number") or 0),
+    )
+    latest = versions_sorted[-1]
+
+    tab_latest, tab_select, tab_all, tab_table, tab_raw = st.tabs(["Latest", "Select", "All (scroll)", "Table", "Raw"])
+
+    with tab_latest:
+        _render_latest_version_pretty(latest)
+
+    with tab_select:
+        def _label(v: dict[str, Any]) -> str:
+            vn = v.get("version_number")
+            kind = v.get("version_kind")
+            lbl = v.get("variant_label")
+            parts = [f"v{vn}", str(kind or "")]
+            if lbl:
+                parts.append(str(lbl))
+            return " • ".join([p for p in parts if p])
+
+        indices = list(range(len(versions_sorted)))
+        default_idx = max(0, len(indices) - 1)
+        chosen_idx = st.selectbox(
+            "version",
+            options=indices,
+            index=default_idx,
+            format_func=lambda i: _label(versions_sorted[i]),
+        )
+        chosen_entity = versions_sorted[int(chosen_idx)]
+        _render_latest_version_pretty(chosen_entity)
+
+    with tab_all:
+        st.caption("Showing newest first. Expand a version to view its full content.")
+        newest_first = list(reversed(versions_sorted))
+        for v in newest_first:
+            vn = v.get("version_number")
+            kind = v.get("version_kind")
+            lbl = v.get("variant_label")
+            vid = v.get("version_id")
+            header = f"v{vn} • {kind}" + (f" • {lbl}" if lbl else "")
+            with st.expander(header, expanded=False):
+                if vid:
+                    st.caption(f"version_id: {vid}")
+                content = v.get("content") or ""
+                t_render, t_raw2 = st.tabs(["Rendered", "Raw"])
+                with t_render:
+                    st.markdown(content if isinstance(content, str) else str(content))
+                with t_raw2:
+                    st.code(content if isinstance(content, str) else _safe_json_dumps(content))
+
+    with tab_table:
+        rows = [
+            {
+                "version_number": int(v.get("version_number") or 0),
+                "version_kind": v.get("version_kind"),
+                "variant_label": v.get("variant_label"),
+                "version_id": v.get("version_id"),
+                "content_preview": (v.get("content") or "")[:200].replace("\n", " "),
+            }
+            for v in versions_sorted
+        ]
+        st.dataframe(rows, use_container_width=True)
+
+    with tab_raw:
+        st.code(_safe_json_dumps(payload), language="json")
+
+
 def _extract_preview_text(obj: Any) -> str | None:
     if isinstance(obj, str):
         return obj
@@ -343,9 +419,21 @@ This tab mirrors your PowerShell curl flow and shows **method / URL / headers / 
                 ),
                 height=80,
             )
-            target_audience = st.text_input("target_audience", value="builders")
-            content_depth = st.text_input("content_depth", value="intermediate")
-            tone_preference = st.text_input("tone_preference", value="professional")
+            target_audience_opt = st.selectbox(
+                "target_audience (optional)",
+                ["(none)", "builders", "founders", "enterprise", "general tech"],
+                index=1,
+            )
+            content_depth_opt = st.selectbox(
+                "content_depth (optional)",
+                ["(none)", "surface", "intermediate", "deep"],
+                index=2,
+            )
+            tone_preference = st.selectbox(
+                "tone_preference",
+                ["professional", "analytical", "conversational"],
+                index=0,
+            )
             distribution_targets = st.multiselect(
                 "distribution_targets",
                 ["linkedin", "x", "medium", "github", "youtube", "instagram", "substack"],
@@ -353,17 +441,24 @@ This tab mirrors your PowerShell curl flow and shows **method / URL / headers / 
             )
             submitted0 = st.form_submit_button("POST /api/v1/projects/")
 
+        target_audience = None if target_audience_opt == "(none)" else target_audience_opt
+        content_depth = None if content_depth_opt == "(none)" else content_depth_opt
+        topic_payload_current = {
+            "project_id": project_id,
+            "topic_title": topic_title,
+            "core_idea": core_idea,
+            "user_content": (user_content or None),
+            "target_audience": target_audience,
+            "content_depth": content_depth,
+            "tone_preference": tone_preference,
+            "distribution_targets": distribution_targets,
+        }
+
         if submitted0:
-            payload0 = {
-                "project_id": project_id,
-                "topic_title": topic_title,
-                "core_idea": core_idea,
-                "user_content": (user_content or None),
-                "target_audience": (target_audience or None),
-                "content_depth": (content_depth or None),
-                "tone_preference": tone_preference,
-                "distribution_targets": distribution_targets,
-            }
+            if not distribution_targets:
+                st.error("distribution_targets must include at least one platform.")
+                st.stop()
+            payload0 = topic_payload_current
             resp = api.request(
                 "POST",
                 "/api/v1/projects/",
@@ -374,6 +469,82 @@ This tab mirrors your PowerShell curl flow and shows **method / URL / headers / 
             if show_details:
                 with st.expander("Request details", expanded=True):
                     _render_request_details(method=resp.method, url=resp.url, headers=resp.request_headers, payload=payload0)
+            _render_response(resp)
+            _push_history(resp)
+
+        st.divider()
+        st.markdown("### 1a) Run research only (`POST /api/v1/workflows/nodes/research`)")
+        persist_context_research = st.checkbox("persist_context (research)", value=True)
+        if st.button("POST /api/v1/workflows/nodes/research"):
+            if not topic_payload_current.get("distribution_targets"):
+                st.error("distribution_targets must include at least one platform.")
+                st.stop()
+            payload_research = {
+                "topic": topic_payload_current,
+                "persist_context": bool(persist_context_research),
+            }
+            resp = api.request(
+                "POST",
+                "/api/v1/workflows/nodes/research",
+                json_payload=payload_research,
+                headers=default_headers,
+                timeout_s=int(default_timeout_s),
+            )
+            if show_details:
+                with st.expander("Request details", expanded=True):
+                    _render_request_details(
+                        method=resp.method,
+                        url=resp.url,
+                        headers=resp.request_headers,
+                        payload=payload_research,
+                    )
+            _render_response(resp)
+            _push_history(resp)
+
+        st.divider()
+        st.markdown("### 1b) Run master only (`POST /api/v1/workflows/nodes/master`)")
+        c_m1, c_m2 = st.columns(2)
+        with c_m1:
+            persist_context_master = st.checkbox("persist_context (master)", value=True)
+        with c_m2:
+            persist_versions_master = st.checkbox("persist_versions (master)", value=True)
+        research_override_raw = st.text_area(
+            "research override (optional JSON)",
+            value="",
+            help="Optional `ResearchTrendResponse` JSON. Leave blank to auto-run Node 1 inside this endpoint.",
+            height=120,
+        )
+        if st.button("POST /api/v1/workflows/nodes/master"):
+            if not topic_payload_current.get("distribution_targets"):
+                st.error("distribution_targets must include at least one platform.")
+                st.stop()
+            payload_master: dict[str, Any] = {
+                "topic": topic_payload_current,
+                "persist_context": bool(persist_context_master),
+                "persist_versions": bool(persist_versions_master),
+            }
+            if research_override_raw.strip():
+                try:
+                    payload_master["research"] = json.loads(research_override_raw)
+                except Exception as e:
+                    st.error(f"Invalid research override JSON: {e}")
+                    st.stop()
+
+            resp = api.request(
+                "POST",
+                "/api/v1/workflows/nodes/master",
+                json_payload=payload_master,
+                headers=default_headers,
+                timeout_s=int(default_timeout_s),
+            )
+            if show_details:
+                with st.expander("Request details", expanded=True):
+                    _render_request_details(
+                        method=resp.method,
+                        url=resp.url,
+                        headers=resp.request_headers,
+                        payload=payload_master,
+                    )
             _render_response(resp)
             _push_history(resp)
 
@@ -403,6 +574,76 @@ This tab mirrors your PowerShell curl flow and shows **method / URL / headers / 
                     _render_request_details(method=resp.method, url=resp.url, headers=resp.request_headers, payload=payload_run)
             _render_response(resp)
             _push_history(resp)
+
+        with st.expander("Other backend endpoints (direct)", expanded=False):
+            st.caption("These are also available in the backend OpenAPI; useful for quick spot-checks.")
+
+            c_a, c_b = st.columns(2)
+            with c_a:
+                if st.button("GET /api/v1/projects/{project_id}"):
+                    resp = api.request("GET", f"/api/v1/projects/{project_id}", headers={}, timeout_s=int(default_timeout_s))
+                    if show_details:
+                        with st.expander("Request details", expanded=True):
+                            _render_request_details(method=resp.method, url=resp.url, headers=resp.request_headers, payload=None)
+                    _render_response(resp)
+                    _push_history(resp)
+
+                if st.button("GET /api/v1/workflows/nodes/research/{project_id}"):
+                    resp = api.request(
+                        "GET", f"/api/v1/workflows/nodes/research/{project_id}", headers={}, timeout_s=int(default_timeout_s)
+                    )
+                    if show_details:
+                        with st.expander("Request details", expanded=True):
+                            _render_request_details(method=resp.method, url=resp.url, headers=resp.request_headers, payload=None)
+                    _render_response(resp)
+                    _push_history(resp)
+
+            with c_b:
+                if st.button("GET /api/v1/workflows/nodes/master/{project_id}"):
+                    resp = api.request(
+                        "GET", f"/api/v1/workflows/nodes/master/{project_id}", headers={}, timeout_s=int(default_timeout_s)
+                    )
+                    if show_details:
+                        with st.expander("Request details", expanded=True):
+                            _render_request_details(method=resp.method, url=resp.url, headers=resp.request_headers, payload=None)
+                    _render_response(resp)
+                    _push_history(resp)
+
+                st.markdown("#### POST /api/v1/workflows/nodes/editorial")
+                with st.form("editorial_direct"):
+                    current_version_direct = st.number_input("current_version (direct)", min_value=1, value=1, step=1)
+                    user_feedback_direct = st.text_area(
+                        "user_feedback (direct)", value="Make it simpler for beginners", height=80
+                    )
+                    action_direct = st.selectbox(
+                        "action (direct)",
+                        ["rewrite", "expand", "shorten", "simplify", "optimize"],
+                        index=0,
+                    )
+                    target_section_direct = st.text_input("target_section (direct)", value="document")
+                    submit_direct = st.form_submit_button("Run direct editorial")
+
+                if submit_direct:
+                    payload_direct = {
+                        "project_id": project_id,
+                        "current_version": int(current_version_direct),
+                        "editor_actions": [{"action": action_direct, "target_section": target_section_direct}],
+                        "user_feedback": user_feedback_direct,
+                    }
+                    resp = api.request(
+                        "POST",
+                        "/api/v1/workflows/nodes/editorial",
+                        json_payload=payload_direct,
+                        headers=default_headers,
+                        timeout_s=int(default_timeout_s),
+                    )
+                    if show_details:
+                        with st.expander("Request details", expanded=True):
+                            _render_request_details(
+                                method=resp.method, url=resp.url, headers=resp.request_headers, payload=payload_direct
+                            )
+                    _render_response(resp)
+                    _push_history(resp)
 
         st.divider()
         st.markdown("### 3) Editorial workflow (session-based)")
@@ -488,16 +729,25 @@ This tab mirrors your PowerShell curl flow and shows **method / URL / headers / 
                 _push_history(resp)
 
         st.divider()
-        st.markdown("### 4) Verify outputs (`GET /api/v1/versions/{project_id}/latest` and `GET /api/v1/platform-outputs/{project_id}`)")
+        st.markdown("### 4) Verify outputs (`GET /api/v1/versions/{project_id}` and `GET /api/v1/platform-outputs/{project_id}`)")
         c_v, c_o = st.columns(2)
         with c_v:
-            if st.button("GET /api/v1/versions/{project_id}/latest"):
-                resp = api.request("GET", f"/api/v1/versions/{project_id}/latest", headers={}, timeout_s=int(default_timeout_s))
+            version_kind = st.selectbox(
+                "version_kind (optional filter)",
+                ["all", "base", "variant", "editorial"],
+                index=0,
+                key="verify_version_kind",
+            )
+            versions_path = (
+                f"/api/v1/versions/{project_id}" if version_kind == "all" else f"/api/v1/versions/{project_id}/{version_kind}"
+            )
+            if st.button("GET versions"):
+                resp = api.request("GET", versions_path, headers={}, timeout_s=int(default_timeout_s))
                 if show_details:
                     with st.expander("Request details", expanded=True):
                         _render_request_details(method=resp.method, url=resp.url, headers=resp.request_headers, payload=None)
                 if _is_success(resp) and isinstance(resp.response_json, dict):
-                    _render_latest_version_pretty(resp.response_json)
+                    _render_versions_list_pretty(resp.response_json)
                     with st.expander("Raw response", expanded=False):
                         _render_response(resp)
                 else:
@@ -592,14 +842,26 @@ This tab mirrors your PowerShell curl flow and shows **method / URL / headers / 
     with tab_storage:
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown("### Latest version (`GET /api/v1/versions/{project_id}/latest`)")
-            if st.button("Refresh latest version"):
-                resp = api.request("GET", f"/api/v1/versions/{project_id}/latest", headers={}, timeout_s=int(default_timeout_s))
+            st.markdown("### Versions")
+            version_kind_storage = st.selectbox(
+                "version_kind (optional filter)",
+                ["all", "base", "variant", "editorial"],
+                index=0,
+                key="storage_version_kind",
+            )
+            versions_path_storage = (
+                f"/api/v1/versions/{project_id}"
+                if version_kind_storage == "all"
+                else f"/api/v1/versions/{project_id}/{version_kind_storage}"
+            )
+            st.caption(f"Endpoint: `{versions_path_storage}`")
+            if st.button("Refresh versions"):
+                resp = api.request("GET", versions_path_storage, headers={}, timeout_s=int(default_timeout_s))
                 if show_details:
                     with st.expander("Request details", expanded=True):
                         _render_request_details(method=resp.method, url=resp.url, headers=resp.request_headers, payload=None)
                 if _is_success(resp) and isinstance(resp.response_json, dict):
-                    _render_latest_version_pretty(resp.response_json)
+                    _render_versions_list_pretty(resp.response_json)
                     with st.expander("Raw response", expanded=False):
                         _render_response(resp)
                 else:

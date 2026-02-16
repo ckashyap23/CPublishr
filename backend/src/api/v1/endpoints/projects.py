@@ -14,6 +14,8 @@ router = APIRouter()
 @router.post("/", response_model=TopicInitializationResponse)
 def initialize_topic(payload: TopicInitializationRequest, db: Session = Depends(get_db)) -> TopicInitializationResponse:
     engine = OrchestrationEngine(db)
+    # Node 0 marks a fresh run boundary; clear prior project-scoped data first.
+    engine.projects.reset_project_data(payload.project_id)
     engine.projects.get_or_create(payload.project_id)
     ctx = NodeExecutionContext(project_id=payload.project_id, run_id="node0", input_payload=payload.model_dump())
     res = engine.node0.run(ctx)

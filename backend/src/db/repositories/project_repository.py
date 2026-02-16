@@ -5,7 +5,11 @@ import json
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.db.models.content_version import ContentVersion
+from src.db.models.editorial_session import EditorialSession
+from src.db.models.platform_output import PlatformOutput
 from src.db.models.project import Project
+from src.db.models.publish_job import PublishJob
 from src.schemas.context_bundle import ContextBundleV1
 
 
@@ -25,6 +29,41 @@ class ProjectRepository:
         self.db.commit()
         self.db.refresh(p)
         return p
+
+    def reset_project_data(self, project_id: str) -> dict[str, int]:
+        deleted_versions = (
+            self.db.query(ContentVersion)
+            .filter(ContentVersion.project_id == project_id)
+            .delete(synchronize_session=False)
+        )
+        deleted_outputs = (
+            self.db.query(PlatformOutput)
+            .filter(PlatformOutput.project_id == project_id)
+            .delete(synchronize_session=False)
+        )
+        deleted_jobs = (
+            self.db.query(PublishJob)
+            .filter(PublishJob.project_id == project_id)
+            .delete(synchronize_session=False)
+        )
+        deleted_sessions = (
+            self.db.query(EditorialSession)
+            .filter(EditorialSession.project_id == project_id)
+            .delete(synchronize_session=False)
+        )
+        deleted_project_rows = (
+            self.db.query(Project)
+            .filter(Project.project_id == project_id)
+            .delete(synchronize_session=False)
+        )
+        self.db.commit()
+        return {
+            "content_versions": int(deleted_versions or 0),
+            "platform_outputs": int(deleted_outputs or 0),
+            "publish_jobs": int(deleted_jobs or 0),
+            "editorial_sessions": int(deleted_sessions or 0),
+            "projects": int(deleted_project_rows or 0),
+        }
 
     def set_context_bundle(self, project_id: str, context_bundle: dict) -> Project:
         p = self.get_or_create(project_id)

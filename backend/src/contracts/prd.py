@@ -38,10 +38,18 @@ class ResearchTrendResponse(ContractModel):
     contrarian_angles: list[str]
 
 
+class MasterContentVariant(ContractModel):
+    label: str
+    master_document: str
+    structure_outline: list[str]
+    core_arguments: list[str]
+
+
 class MasterContentResponse(ContractModel):
     master_document: str
     structure_outline: list[str]
     core_arguments: list[str]
+    master_variants: list[MasterContentVariant] | None = None
 
 
 EditorialActionType = Literal["rewrite", "expand", "shorten", "simplify", "optimize"]
@@ -123,6 +131,7 @@ class DistributionResponse(ContractModel):
 
 
 ProjectStatus = Literal["draft", "ready", "published"]
+ContentVersionKind = Literal["base", "variant", "editorial"]
 
 
 class ProjectEntity(ContractModel):
@@ -135,6 +144,8 @@ class ContentVersionEntity(ContractModel):
     version_id: str
     project_id: str
     version_number: int
+    version_kind: ContentVersionKind | None = None
+    variant_label: str | None = None
     content: str
 
 

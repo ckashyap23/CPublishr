@@ -1,1 +1,13 @@
-{"master_document":"# Doc","structure_outline":["one"],"core_arguments":["arg"]}
+{
+  "master_document": "# Doc",
+  "structure_outline": ["one"],
+  "core_arguments": ["arg"],
+  "master_variants": [
+    {
+      "label": "Balanced (50/50) - Problem/Solution",
+      "master_document": "# Doc Variant",
+      "structure_outline": ["one"],
+      "core_arguments": ["arg"]
+    }
+  ]
+}

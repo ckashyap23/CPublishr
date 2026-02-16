@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 
+from src.contracts.prd import ResearchTrendResponse, TopicInitializationRequest
+
 
 class WorkflowRunRequest(BaseModel):
     project_id: str = Field(min_length=1)
@@ -10,6 +12,18 @@ class WorkflowRunRequest(BaseModel):
 class WorkflowRunResponse(BaseModel):
     run_id: str
     status: str
+
+
+class ResearchNodeRunRequest(BaseModel):
+    topic: TopicInitializationRequest
+    persist_context: bool = True
+
+
+class MasterNodeRunRequest(BaseModel):
+    topic: TopicInitializationRequest
+    research: ResearchTrendResponse | None = None
+    persist_context: bool = True
+    persist_versions: bool = True
 
 
 class EditorialSessionStartRequest(BaseModel):

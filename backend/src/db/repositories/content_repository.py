@@ -16,8 +16,24 @@ class ContentRepository:
         current = self.db.execute(stmt).scalar_one_or_none()
         return int(current or 0) + 1
 
-    def create_version(self, *, version_id: str, project_id: str, content: str, version_number: int) -> ContentVersion:
-        v = ContentVersion(version_id=version_id, project_id=project_id, version_number=version_number, content=content)
+    def create_version(
+        self,
+        *,
+        version_id: str,
+        project_id: str,
+        content: str,
+        version_number: int,
+        version_kind: str = "base",
+        variant_label: str | None = None,
+    ) -> ContentVersion:
+        v = ContentVersion(
+            version_id=version_id,
+            project_id=project_id,
+            version_number=version_number,
+            version_kind=version_kind,
+            variant_label=variant_label,
+            content=content,
+        )
         self.db.add(v)
         self.db.commit()
         self.db.refresh(v)
@@ -25,6 +41,15 @@ class ContentRepository:
 
     def list_versions(self, project_id: str) -> list[ContentVersion]:
         stmt = select(ContentVersion).where(ContentVersion.project_id == project_id).order_by(ContentVersion.version_number.asc())
+        return list(self.db.execute(stmt).scalars().all())
+
+    def list_versions_by_kind(self, project_id: str, version_kind: str) -> list[ContentVersion]:
+        stmt = (
+            select(ContentVersion)
+            .where(ContentVersion.project_id == project_id)
+            .where(ContentVersion.version_kind == version_kind)
+            .order_by(ContentVersion.version_number.asc())
+        )
         return list(self.db.execute(stmt).scalars().all())
 
     def get_version_by_number(self, project_id: str, version_number: int) -> ContentVersion | None:
@@ -40,6 +65,16 @@ class ContentRepository:
         stmt = (
             select(ContentVersion)
             .where(ContentVersion.project_id == project_id)
+            .order_by(ContentVersion.version_number.desc())
+            .limit(1)
+        )
+        return self.db.execute(stmt).scalars().first()
+
+    def get_latest_version_by_kind(self, project_id: str, version_kind: str) -> ContentVersion | None:
+        stmt = (
+            select(ContentVersion)
+            .where(ContentVersion.project_id == project_id)
+            .where(ContentVersion.version_kind == version_kind)
             .order_by(ContentVersion.version_number.desc())
             .limit(1)
         )

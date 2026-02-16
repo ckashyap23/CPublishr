@@ -11,6 +11,8 @@ from src.schemas.workflow import (
     EditorialSessionIterateResponse,
     EditorialSessionStartRequest,
     EditorialSessionStartResponse,
+    MasterNodeRunRequest,
+    ResearchNodeRunRequest,
     WorkflowRunRequest,
     WorkflowRunResponse,
 )
@@ -19,6 +21,19 @@ from src.services.orchestration.engine import OrchestrationEngine
 from src.utils.ids import new_id
 
 router = APIRouter()
+
+
+def _context_bundle_from_topic(req: TopicInitializationRequest) -> dict:
+    return {
+        "topic_title": req.topic_title,
+        "normalized_topic": req.topic_title.lower(),
+        "core_idea": req.core_idea,
+        "user_content": req.user_content,
+        "target_audience": req.target_audience,
+        "content_depth": req.content_depth,
+        "tone_preference": req.tone_preference,
+        "distribution_targets": req.distribution_targets,
+    }
 
 
 def _load_topic_request(project_id: str, db: Session) -> TopicInitializationRequest:
@@ -45,12 +60,13 @@ def run_workflow(payload: WorkflowRunRequest, db: Session = Depends(get_db)) -> 
     run_id, status = engine.run_default_flow(req)
 
     if payload.run_editorial:
-        latest = ContentRepository(db).get_latest_version(payload.project_id)
-        if latest is not None:
+        repo = ContentRepository(db)
+        target = repo.get_latest_version_by_kind(payload.project_id, "base") or repo.get_latest_version(payload.project_id)
+        if target is not None:
             engine.run_editorial(
                 EditorialRequest(
                     project_id=payload.project_id,
-                    current_version=latest.version_number,
+                    current_version=target.version_number,
                     editor_actions=[{"action": "rewrite", "target_section": "document"}],
                     user_feedback=payload.editorial_comment or "Polish and improve clarity for publishing.",
                 )
@@ -67,16 +83,24 @@ def run_research_node(project_id: str, db: Session = Depends(get_db)) -> Researc
         project_id=project_id,
         run_id="node1",
         input_payload={"project_id": project_id},
-        state={"context_bundle": {
-            "topic_title": req.topic_title,
-            "normalized_topic": req.topic_title.lower(),
-            "core_idea": req.core_idea,
-            "user_content": req.user_content,
-            "target_audience": req.target_audience,
-            "content_depth": req.content_depth,
-            "tone_preference": req.tone_preference,
-            "distribution_targets": req.distribution_targets,
-        }},
+        state={"context_bundle": _context_bundle_from_topic(req)},
+    )
+    return ResearchTrendResponse.model_validate(engine.node1.run(ctx).output_payload)
+
+
+@router.post("/nodes/research", response_model=ResearchTrendResponse)
+def run_research_node_post(payload: ResearchNodeRunRequest, db: Session = Depends(get_db)) -> ResearchTrendResponse:
+    req = payload.topic
+    engine = OrchestrationEngine(db)
+    engine.projects.get_or_create(req.project_id)
+    bundle = _context_bundle_from_topic(req)
+    if payload.persist_context:
+        engine.projects.set_context_bundle(req.project_id, bundle)
+    ctx = NodeExecutionContext(
+        project_id=req.project_id,
+        run_id="node1_post",
+        input_payload={"project_id": req.project_id},
+        state={"context_bundle": bundle},
     )
     return ResearchTrendResponse.model_validate(engine.node1.run(ctx).output_payload)
 
@@ -89,22 +113,79 @@ def run_master_node(project_id: str, db: Session = Depends(get_db)) -> MasterCon
         project_id=project_id,
         run_id="node2",
         input_payload={"project_id": project_id},
-        state={"context_bundle": {
-            "topic_title": req.topic_title,
-            "normalized_topic": req.topic_title.lower(),
-            "core_idea": req.core_idea,
-            "user_content": req.user_content,
-            "target_audience": req.target_audience,
-            "content_depth": req.content_depth,
-            "tone_preference": req.tone_preference,
-            "distribution_targets": req.distribution_targets,
-        }},
+        state={"context_bundle": _context_bundle_from_topic(req)},
     )
     ctx.state["research"] = engine.node1.run(ctx).output_payload
     out = MasterContentResponse.model_validate(engine.node2.run(ctx).output_payload)
 
     repo = ContentRepository(db)
-    repo.create_version(version_id=new_id("ver"), project_id=project_id, content=out.master_document, version_number=repo.next_version_number(project_id))
+    repo.create_version(
+        version_id=new_id("ver"),
+        project_id=project_id,
+        content=out.master_document,
+        version_number=repo.next_version_number(project_id),
+        version_kind="base",
+        variant_label=None,
+    )
+    for mv in out.master_variants or []:
+        variant_doc = (mv.master_document or "").strip()
+        if not variant_doc:
+            continue
+        repo.create_version(
+            version_id=new_id("ver"),
+            project_id=project_id,
+            content=variant_doc,
+            version_number=repo.next_version_number(project_id),
+            version_kind="variant",
+            variant_label=(mv.label or "").strip() or None,
+        )
+    return out
+
+
+@router.post("/nodes/master", response_model=MasterContentResponse)
+def run_master_node_post(payload: MasterNodeRunRequest, db: Session = Depends(get_db)) -> MasterContentResponse:
+    req = payload.topic
+    engine = OrchestrationEngine(db)
+    engine.projects.get_or_create(req.project_id)
+    bundle = _context_bundle_from_topic(req)
+    if payload.persist_context:
+        engine.projects.set_context_bundle(req.project_id, bundle)
+
+    ctx = NodeExecutionContext(
+        project_id=req.project_id,
+        run_id="node2_post",
+        input_payload={"project_id": req.project_id},
+        state={"context_bundle": bundle},
+    )
+    ctx.state["research"] = (
+        payload.research.model_dump()
+        if payload.research is not None
+        else ResearchTrendResponse.model_validate(engine.node1.run(ctx).output_payload).model_dump()
+    )
+
+    out = MasterContentResponse.model_validate(engine.node2.run(ctx).output_payload)
+    if payload.persist_versions:
+        repo = ContentRepository(db)
+        repo.create_version(
+            version_id=new_id("ver"),
+            project_id=req.project_id,
+            content=out.master_document,
+            version_number=repo.next_version_number(req.project_id),
+            version_kind="base",
+            variant_label=None,
+        )
+        for mv in out.master_variants or []:
+            variant_doc = (mv.master_document or "").strip()
+            if not variant_doc:
+                continue
+            repo.create_version(
+                version_id=new_id("ver"),
+                project_id=req.project_id,
+                content=variant_doc,
+                version_number=repo.next_version_number(req.project_id),
+                version_kind="variant",
+                variant_label=(mv.label or "").strip() or None,
+            )
     return out
 
 

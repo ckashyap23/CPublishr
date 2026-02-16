@@ -4,152 +4,116 @@ This document defines how to improve Node 2 (`master_content.py`) without breaki
 
 ## Goal
 
-Own the logic that converts Node 0 + Node 1 context into a high-quality canonical master document.
+Convert Node 0 + Node 1 context into a canonical base master document and optional variant master documents.
 
-Node 2 should:
-- Build a strong platform-neutral source document
-- Preserve stable contracts for adapters and editorial flows
-- Be independently improvable without schema drift
+## Endpoint Entry Points
 
-## Current File and Responsibility
+- Preferred isolated testing endpoint: `POST /api/v1/workflows/nodes/master`
+  - Body:
+    - `topic: TopicInitializationRequest` (required)
+    - `research: ResearchTrendResponse` (optional override)
+    - `persist_context: bool` (optional)
+    - `persist_versions: bool` (optional)
+- Existing project-based endpoint: `GET /api/v1/workflows/nodes/master/{project_id}`
 
-Primary file:
-- `backend/src/services/orchestration/nodes/master_content.py`
+Important:
+- `POST /api/v1/projects/` for an existing `project_id` resets prior project-scoped rows for that project before saving fresh Node 0 context.
 
-Current behavior:
+## Current Behavior
+
 1. Reads `context.state["context_bundle"]` from Node 0.
 2. Reads `context.state["research"]` from Node 1.
-3. Builds `master_document` markdown using title/core idea/research summary.
-4. Returns `structure_outline` and `core_arguments` arrays.
-5. Stores result in `context.state["master"]`.
+3. Produces base `master_document`.
+4. Produces base `structure_outline` as a section map (H2 headings in order).
+5. Produces base `core_arguments`.
+6. Optionally produces `master_variants` with variant label + content + section map.
+7. Stores output in `context.state["master"]`.
 
-## Non-Negotiable Contract Rule
+## Contract (Must Stay Stable)
 
-Node 2 output schema must remain exactly:
-
-- `master_document: string` (markdown)
+Node 2 output (`MasterContentResponse`) fields:
+- `master_document: string`
 - `structure_outline: string[]`
 - `core_arguments: string[]`
+- `master_variants?: { label: string, master_document: string, structure_outline: string[], core_arguments: string[] }[]`
 
-Do not change key names or data types.
+## Upstream Inputs
 
-## Upstream Input Contracts (Must Be Supported)
+### Node 0 context bundle
 
-### Node 0 Output (used via `context_bundle`)
+Required Node 0 inputs (reference):
+- `topic_title`, `core_idea`, `tone_preference`, `distribution_targets`
 
-Node 0 input requirements (for reference):
-- Required: `topic_title`, `core_idea`, `tone_preference`, `distribution_targets`
-- Optional: `user_content`, `target_audience`, `content_depth`
+Optional Node 0 inputs:
+- `user_content`, `target_audience`, `content_depth`
 
-```json
-{
-  "project_id": "proj_team_001",
-  "normalized_topic": "multi-agent ai content orchestration",
-  "context_bundle": {
-    "topic_title": "Multi-Agent AI Content Orchestration",
-    "normalized_topic": "multi-agent ai content orchestration",
-    "core_idea": "Generate one canonical master document, then adapt packaging per platform.",
-    "user_content": "Imagine your content as a movie script: you write one master doc, and a crew of AI “agents” turns it into trailers, posters, and behind-the-scenes clips—automatically. One agent makes a punchy LinkedIn post, another crafts an Instagram carousel, a third writes a Twitter/X thread, and a fourth adapts it into a YouTube short script. Same core story, different costumes, different stage. The fun part? You stop rewriting from scratch and start “directing” the message—while your agents handle the platform-specific polish.",
-    "target_audience": "builders",
-    "content_depth": "intermediate",
-    "tone_preference": "professional",
-    "distribution_targets": ["linkedin", "x", "medium", "github"]
-  }
-}
-```
+### Node 1 research payload
 
-### Node 1 Output (used via `context.state["research"]`)
+- `research_summary`
+- `emerging_tools`
+- `recent_discussions`
+- `key_insights`
+- `contrarian_angles`
 
-```json
-{
-  "research_summary": "Recent adoption shows teams prefer structured AI workflows over one-shot prompting.",
-  "emerging_tools": ["LangGraph", "Temporal", "OpenTelemetry"],
-  "recent_discussions": ["Reliability vs velocity", "Human-in-loop checkpoints"],
-  "key_insights": ["Canonical source reduces drift", "Contracts improve team velocity"],
-  "contrarian_angles": ["More agents is not always better"]
-}
-```
-
-## Downstream Output Contract (Consumed by Node 3 / adapters)
+## Downstream Usage
 
 Node 2 output is used by:
-- Node 3 editorial flow (as current master content source)
-- Platform adapters (transformations)
-- Content version persistence
+- Editorial flow as source content.
+- Adapter generation (base document + supporting context fields).
+- Content version persistence.
 
-Required output shape:
+Persistence behavior:
+- Base document saved as `content_versions` row with `version_kind="base"`.
+- Each variant saved as separate `content_versions` row with `version_kind="variant"` and `variant_label`.
+
+## Required Output Example
 
 ```json
 {
   "master_document": "# ...markdown...",
-  "structure_outline": ["..."],
-  "core_arguments": ["..."]
+  "structure_outline": ["Hook", "Core Idea", "Section 1", "Section 2", "Section 3", "Key Takeaways", "Close"],
+  "core_arguments": ["..."],
+  "master_variants": [
+    {
+      "label": "Balanced (50/50) - Problem/Solution",
+      "master_document": "# ...variant markdown...",
+      "structure_outline": ["Hook", "Core Idea", "Section 1", "Section 2", "Section 3", "Key Takeaways", "Close"],
+      "core_arguments": ["..."]
+    }
+  ]
 }
 ```
 
-Any schema change here can break:
-- editorial session workflows
-- adapter generation
-- API contract expectations
+## Implementation Guidance
 
-## Recommended Implementation Pattern
+1. Normalize and validate Node 0/Node 1 inputs.
+2. Generate base document first.
+3. Ensure base `structure_outline` is section-map semantics (not variant labels).
+4. Generate variants; keep labels in `master_variants[*].label`.
+5. Ensure each variant also has section-map `structure_outline`.
+6. Validate output with `MasterContentResponse` before return.
 
-1. Input normalization
-- Read Node 0 and Node 1 state safely with defaults.
-- Validate minimum required signals (title/core idea/research summary).
+## Avoid Breaking Changes
 
-2. Structured composition
-- Build a stable section template, for example:
-  - Hook
-  - Core Idea
-  - Why it matters now
-  - Framework
-  - Examples / tradeoffs
-  - Conclusion
-
-3. Research grounding
-- Map Node 1 `key_insights` into argument sections.
-- Map `contrarian_angles` into balanced/counterpoint sections.
-- Use `recent_discussions` to enrich practical examples.
-
-4. Quality gates
-- Ensure `master_document` is non-empty and markdown-valid-ish.
-- Ensure `structure_outline` and `core_arguments` are non-empty lists.
-- Keep deterministic ordering in returned arrays.
-
-5. Contract validation before return
-- Validate against `MasterContentResponse` before returning.
-
-## Safe Improvement Areas
-
-- Better LLM prompts for audience/tone/depth alignment.
-- Multi-pass generation (draft + refinement) inside Node 2.
-- Stronger fallback behavior when LLM/API calls fail.
-- Deterministic markdown formatting conventions.
-- Light scoring/quality checks before final output.
-
-## Avoid These Breaking Changes
-
-- Renaming/removing output keys.
-- Returning nested objects instead of list[str] for outline/arguments.
-- Writing master result somewhere other than `context.state["master"]`.
-- Depending on fields not guaranteed by Node 0/Node 1 contracts.
+- Do not rename/remove Node 2 output keys.
+- Do not change field types.
+- Do not repurpose `structure_outline` back to variant labels.
+- Do not bypass `context.state["master"]` output handoff.
 
 ## Testing Checklist
 
 Minimum:
-- Node 2 returns contract-valid output for normal inputs.
-- Node 2 returns contract-valid output on degraded/missing research inputs.
-- Node 3 still works against Node 2 output with no code changes.
+- Contract-valid output for base + optional variants.
+- Valid fallback behavior when LLM output is missing/bad.
+- Node 3/editorial endpoints continue to work unchanged.
 
-Recommended tests to add:
-- Unit test: deterministic section ordering.
-- Unit test: fallback generation with missing `research_summary`.
-- Contract validation test for Node 2 output shape.
+Recommended:
+- Unit test that base `structure_outline` equals heading map.
+- Unit test that variant outlines are heading maps.
+- Integration test confirming base/variant versions persist with metadata.
 
-## Done Criteria for Node 2 Owner
+## Done Criteria
 
-- Logic is improved but output contract is unchanged.
-- `master_document`, `structure_outline`, `core_arguments` are always valid.
-- Node 3/editorial and adapters continue working unchanged.
-- Failure paths still produce usable, contract-valid master content.
+- Output contract stable and valid.
+- Base and variants are both usable in editorial flows via version numbers.
+- Section outline semantics are consistent for base and variants.
