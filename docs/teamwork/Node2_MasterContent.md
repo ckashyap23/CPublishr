@@ -37,6 +37,10 @@ Do not change key names or data types.
 
 ### Node 0 Output (used via `context_bundle`)
 
+Node 0 input requirements (for reference):
+- Required: `topic_title`, `core_idea`, `tone_preference`, `distribution_targets`
+- Optional: `user_content`, `target_audience`, `content_depth`
+
 ```json
 {
   "project_id": "proj_team_001",
@@ -45,6 +49,7 @@ Do not change key names or data types.
     "topic_title": "Multi-Agent AI Content Orchestration",
     "normalized_topic": "multi-agent ai content orchestration",
     "core_idea": "Generate one canonical master document, then adapt packaging per platform.",
+    "user_content": "Imagine your content as a movie script: you write one master doc, and a crew of AI “agents” turns it into trailers, posters, and behind-the-scenes clips—automatically. One agent makes a punchy LinkedIn post, another crafts an Instagram carousel, a third writes a Twitter/X thread, and a fourth adapts it into a YouTube short script. Same core story, different costumes, different stage. The fun part? You stop rewriting from scratch and start “directing” the message—while your agents handle the platform-specific polish.",
     "target_audience": "builders",
     "content_depth": "intermediate",
     "tone_preference": "professional",

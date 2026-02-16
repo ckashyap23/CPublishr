@@ -14,6 +14,19 @@ Node 1 can include:
 - Heuristic or LLM-assisted summarization
 - Contrarian angle generation
 
+## Node 0 Input Schema (Latest)
+
+Required:
+- `topic_title`
+- `core_idea`
+- `tone_preference`
+- `distribution_targets`
+
+Optional:
+- `user_content`
+- `target_audience`
+- `content_depth`
+
 ## Non-Negotiable Contract Rule
 
 Node 1 output schema must remain exactly:
@@ -54,6 +67,7 @@ Useful fields available:
 - `topic_title`
 - `normalized_topic`
 - `core_idea`
+- `user_content`
 - `target_audience`
 - `content_depth`
 - `tone_preference`
@@ -73,6 +87,7 @@ Node 1 typically receives this through `context.state["context_bundle"]`:
     "topic_title": "Multi-Agent AI Content Orchestration",
     "normalized_topic": "multi-agent ai content orchestration",
     "core_idea": "Generate one canonical master document, then adapt packaging per platform.",
+    "user_content": "Imagine your content as a movie script: you write one master doc, and a crew of AI “agents” turns it into trailers, posters, and behind-the-scenes clips—automatically. One agent makes a punchy LinkedIn post, another crafts an Instagram carousel, a third writes a Twitter/X thread, and a fourth adapts it into a YouTube short script. Same core story, different costumes, different stage. The fun part? You stop rewriting from scratch and start “directing” the message—while your agents handle the platform-specific polish.",
     "target_audience": "builders",
     "content_depth": "intermediate",
     "tone_preference": "professional",

@@ -25,6 +25,7 @@ def test_happy_path_topic_to_outputs_and_editorial_and_publish_job() -> None:
         "project_id": project_id,
         "topic_title": "AI agents for content",
         "core_idea": "One master doc, many platform-native variants.",
+        "user_content": "Include practical startup examples where possible.",
         "target_audience": "builders",
         "content_depth": "intermediate",
         "tone_preference": "professional",

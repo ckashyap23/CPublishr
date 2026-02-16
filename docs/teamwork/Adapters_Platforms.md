@@ -22,7 +22,7 @@ Common input to each adapter:
 - `context: dict` (Node 0 + Node 2 metadata)
 
 Common processing pattern:
-1. Read relevant fields from `context` (`topic_title`, `normalized_topic`, `core_idea`, etc.)
+1. Read relevant fields from `context` (`topic_title`, `normalized_topic`, `core_idea`, `user_content`, etc.)
 2. Apply platform-specific formatting rules
 3. Return a contract-compliant structured dict
 

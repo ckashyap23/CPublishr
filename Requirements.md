@@ -8,6 +8,10 @@ Core workflow:
 3. Node 2: Master Content Generator
 4. Node 3: Editorial (Human-in-the-loop)
 
+Node 0 input contract:
+- Required: `topic_title`, `core_idea`, `tone_preference`, `distribution_targets`
+- Optional: `user_content`, `target_audience`, `content_depth`
+
 Platform adapters:
 - LinkedIn, X, YouTube, Instagram, Substack, Medium, GitHub
 

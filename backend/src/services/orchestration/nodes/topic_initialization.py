@@ -1,6 +1,7 @@
 from src.services.llm.azure_openai import AzureOpenAIClient, parse_json_object
 from src.services.orchestration.contracts import NodeExecutionContext, NodeExecutionResult
 from src.services.orchestration.nodes.base import OrchestrationNode
+from src.schemas.context_bundle import ContextBundleV1
 
 
 class TopicInitializationNode(OrchestrationNode):
@@ -34,11 +35,14 @@ class TopicInitializationNode(OrchestrationNode):
             "topic_title": title,
             "normalized_topic": normalized,
             "core_idea": (p.get("core_idea") or "").strip(),
+            "user_content": (p.get("user_content") or "").strip() or None,
             "target_audience": p.get("target_audience"),
             "content_depth": p.get("content_depth"),
             "tone_preference": p.get("tone_preference"),
             "distribution_targets": p.get("distribution_targets") or [],
         }
+        # Validate schema to prevent downstream breakages if keys/types drift.
+        ContextBundleV1.model_validate(bundle)
         context.state["context_bundle"] = bundle
         return NodeExecutionResult(
             status="completed",

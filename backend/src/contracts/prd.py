@@ -17,8 +17,9 @@ class TopicInitializationRequest(ContractModel):
     project_id: str
     topic_title: str
     core_idea: str
-    target_audience: TargetAudience
-    content_depth: ContentDepth
+    user_content: str | None = None
+    target_audience: TargetAudience | None = None
+    content_depth: ContentDepth | None = None
     tone_preference: TonePreference
     distribution_targets: list[DistributionTarget]
 

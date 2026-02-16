@@ -23,6 +23,7 @@ def test_mvp_end_to_end_minimal_flow() -> None:
         "project_id": project_id,
         "topic_title": "AI workflow MVP",
         "core_idea": "One master doc and predictable adapters.",
+        "user_content": "Use this as optional seed context from the user.",
         "target_audience": "builders",
         "content_depth": "surface",
         "tone_preference": "professional",

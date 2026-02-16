@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.db.models.project import Project
+from src.schemas.context_bundle import ContextBundleV1
 
 
 class ProjectRepository:
@@ -27,6 +28,8 @@ class ProjectRepository:
 
     def set_context_bundle(self, project_id: str, context_bundle: dict) -> Project:
         p = self.get_or_create(project_id)
+        # Validate the bundle shape before persisting (allowing extra keys).
+        ContextBundleV1.model_validate(context_bundle or {})
         p.context_json = json.dumps(context_bundle or {}, ensure_ascii=False)
         self.db.add(p)
         self.db.commit()

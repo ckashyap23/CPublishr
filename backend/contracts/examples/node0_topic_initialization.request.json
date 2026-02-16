@@ -1,1 +1,10 @@
-{"project_id":"proj_001","topic_title":"AI Workflow","core_idea":"One master idea","target_audience":"builders","content_depth":"intermediate","tone_preference":"professional","distribution_targets":["linkedin","x","medium","github"]}
+{
+  "project_id": "proj_001",
+  "topic_title": "AI Workflow",
+  "core_idea": "One master idea",
+  "user_content": "Imagine your content as a movie script: you write one master doc, and a crew of AI “agents” turns it into trailers, posters, and behind-the-scenes clips—automatically. One agent makes a punchy LinkedIn post, another crafts an Instagram carousel, a third writes a Twitter/X thread, and a fourth adapts it into a YouTube short script. Same core story, different costumes, different stage. The fun part? You stop rewriting from scratch and start “directing” the message—while your agents handle the platform-specific polish.",
+  "target_audience": "builders",
+  "content_depth": "intermediate",
+  "tone_preference": "professional",
+  "distribution_targets": ["linkedin", "x", "medium", "github"]
+}

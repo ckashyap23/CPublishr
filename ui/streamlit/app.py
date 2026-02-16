@@ -290,7 +290,7 @@ def main() -> None:
     st.title("CPublishr Backend Tester (Streamlit)")
 
     with st.sidebar:
-        base_url = st.text_input("Backend base URL", value="http://127.0.0.1:8000")
+        base_url = st.text_input("Backend base URL", value="http://127.0.0.1:8010")
         project_id = st.text_input("Project ID", value=st.session_state.get("project_id", "proj_local_1"))
         st.session_state["project_id"] = project_id
         st.session_state.setdefault("editorial_session_id", "")
@@ -331,6 +331,18 @@ This tab mirrors your PowerShell curl flow and shows **method / URL / headers / 
         with st.form("flow_node0"):
             topic_title = st.text_input("topic_title", value="AI Multi-Agent Content")
             core_idea = st.text_area("core_idea", value="One master doc, many platform outputs", height=80)
+            user_content = st.text_area(
+                "user_content (optional)",
+                value=(
+                    "Imagine your content as a movie script: you write one master doc, and a crew of AI "
+                    '"agents" turns it into trailers, posters, and behind-the-scenes clips-automatically. '
+                    "One agent makes a punchy LinkedIn post, another crafts an Instagram carousel, a third "
+                    "writes a Twitter/X thread, and a fourth adapts it into a YouTube short script. Same core "
+                    "story, different costumes, different stage. The fun part? You stop rewriting from scratch "
+                    'and start "directing" the message-while your agents handle the platform-specific polish.'
+                ),
+                height=80,
+            )
             target_audience = st.text_input("target_audience", value="builders")
             content_depth = st.text_input("content_depth", value="intermediate")
             tone_preference = st.text_input("tone_preference", value="professional")
@@ -346,8 +358,9 @@ This tab mirrors your PowerShell curl flow and shows **method / URL / headers / 
                 "project_id": project_id,
                 "topic_title": topic_title,
                 "core_idea": core_idea,
-                "target_audience": target_audience,
-                "content_depth": content_depth,
+                "user_content": (user_content or None),
+                "target_audience": (target_audience or None),
+                "content_depth": (content_depth or None),
                 "tone_preference": tone_preference,
                 "distribution_targets": distribution_targets,
             }
