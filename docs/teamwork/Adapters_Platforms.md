@@ -4,7 +4,7 @@ This document clarifies where to change adapter behavior safely, and when additi
 
 ## Scope
 
-Adapters convert Node 2 master content into platform-specific outputs.
+Adapters convert finalized editorial content into platform-specific outputs.
 
 Current files:
 - `backend/src/services/platforms/adapters/linkedin.py`
@@ -18,7 +18,7 @@ Current files:
 ## Input -> Processing -> Output
 
 Common input to each adapter:
-- `master_document: str` (Node 2 canonical markdown)
+- `master_document: str` (finalized editorial markdown)
 - `context: dict` (Node 0 + Node 2 metadata)
 
 Common processing pattern:

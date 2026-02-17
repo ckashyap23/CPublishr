@@ -29,4 +29,10 @@ def get_project(project_id: str, db: Session = Depends(get_db)) -> ProjectEntity
     project = ProjectRepository(db).get(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    return ProjectEntity(project_id=project.project_id, status=project.status, created_at=to_utc_iso(project.created_at))
+    return ProjectEntity(
+        project_id=project.project_id,
+        status=project.status,
+        final_version_number=project.final_version_number,
+        finalized_at=to_utc_iso(project.finalized_at) if project.finalized_at else None,
+        created_at=to_utc_iso(project.created_at),
+    )

@@ -550,17 +550,8 @@ This tab mirrors your PowerShell curl flow and shows **method / URL / headers / 
 
         st.divider()
         st.markdown("### 2) Run workflow (`POST /api/v1/workflows/runs`)")
-        c_run1, c_run2 = st.columns([1, 2])
-        with c_run1:
-            run_editorial = st.checkbox("run_editorial", value=True)
-        with c_run2:
-            editorial_comment = st.text_input("editorial_comment (optional)", value="")
-
-        payload_run = {
-            "project_id": project_id,
-            "run_editorial": bool(run_editorial),
-            "editorial_comment": (editorial_comment or None),
-        }
+        st.caption("This runs Node 0-2 only and returns `awaiting_editorial`.")
+        payload_run = {"project_id": project_id}
         if st.button("POST /api/v1/workflows/runs"):
             resp = api.request(
                 "POST",
@@ -728,6 +719,127 @@ This tab mirrors your PowerShell curl flow and shows **method / URL / headers / 
                 _render_response(resp)
                 _push_history(resp)
 
+        with st.expander("3d) Advanced editorial endpoints", expanded=False):
+            st.markdown("`POST /api/v1/workflows/nodes/editorial/regenerate-outline`")
+            with st.form("editorial_regenerate_outline"):
+                source_version_outline = st.number_input("source_version (regenerate)", min_value=1, value=1, step=1)
+                outline_text = st.text_area(
+                    "structure_outline (one heading per line)",
+                    value="Hook\nCore Idea\nSection 1\nSection 2\nSection 3\nKey Takeaways\nClose",
+                    height=120,
+                )
+                regenerate_submit = st.form_submit_button("Regenerate outline draft")
+            if regenerate_submit:
+                payload_regen = {
+                    "project_id": project_id,
+                    "source_version": int(source_version_outline),
+                    "structure_outline": [line.strip() for line in outline_text.splitlines() if line.strip()],
+                }
+                resp = api.request(
+                    "POST",
+                    "/api/v1/workflows/nodes/editorial/regenerate-outline",
+                    json_payload=payload_regen,
+                    headers=default_headers,
+                    timeout_s=int(default_timeout_s),
+                )
+                if show_details:
+                    with st.expander("Request details", expanded=True):
+                        _render_request_details(
+                            method=resp.method, url=resp.url, headers=resp.request_headers, payload=payload_regen
+                        )
+                _render_response(resp)
+                _push_history(resp)
+
+            st.markdown("`POST /api/v1/workflows/nodes/editorial/save-inline`")
+            with st.form("editorial_save_inline"):
+                source_version_inline = st.number_input("source_version (save-inline)", min_value=1, value=1, step=1)
+                inline_content = st.text_area("content", value="# Edited draft\n\nUpdate here.", height=160)
+                inline_submit = st.form_submit_button("Save inline draft")
+            if inline_submit:
+                payload_inline = {
+                    "project_id": project_id,
+                    "source_version": int(source_version_inline),
+                    "content": inline_content,
+                }
+                resp = api.request(
+                    "POST",
+                    "/api/v1/workflows/nodes/editorial/save-inline",
+                    json_payload=payload_inline,
+                    headers=default_headers,
+                    timeout_s=int(default_timeout_s),
+                )
+                if show_details:
+                    with st.expander("Request details", expanded=True):
+                        _render_request_details(
+                            method=resp.method, url=resp.url, headers=resp.request_headers, payload=payload_inline
+                        )
+                _render_response(resp)
+                _push_history(resp)
+
+            st.markdown("`POST /api/v1/workflows/nodes/editorial/feedback/preview`")
+            with st.form("editorial_feedback_preview"):
+                source_version_preview = st.number_input("source_version (preview)", min_value=1, value=1, step=1)
+                feedback_preview = st.text_area(
+                    "user_feedback (preview)",
+                    value="Improve clarity and shorten repeated phrases.",
+                    height=100,
+                )
+                preview_submit = st.form_submit_button("Generate preview")
+            if preview_submit:
+                payload_preview = {
+                    "project_id": project_id,
+                    "source_version": int(source_version_preview),
+                    "user_feedback": feedback_preview,
+                }
+                resp = api.request(
+                    "POST",
+                    "/api/v1/workflows/nodes/editorial/feedback/preview",
+                    json_payload=payload_preview,
+                    headers=default_headers,
+                    timeout_s=int(default_timeout_s),
+                )
+                if show_details:
+                    with st.expander("Request details", expanded=True):
+                        _render_request_details(
+                            method=resp.method, url=resp.url, headers=resp.request_headers, payload=payload_preview
+                        )
+                _render_response(resp)
+                _push_history(resp)
+
+            st.markdown("`POST /api/v1/workflows/nodes/editorial/finalize-selected`")
+            c_fin1, c_fin2 = st.columns([2, 1])
+            with c_fin1:
+                selected_version_finalize = st.number_input(
+                    "selected_version (finalize-selected)",
+                    min_value=1,
+                    value=1,
+                    step=1,
+                )
+            with c_fin2:
+                finalize_selected_click = st.button("Finalize selected version")
+            if finalize_selected_click:
+                payload_finalize_selected = {
+                    "project_id": project_id,
+                    "selected_version": int(selected_version_finalize),
+                }
+                resp = api.request(
+                    "POST",
+                    "/api/v1/workflows/nodes/editorial/finalize-selected",
+                    json_payload=payload_finalize_selected,
+                    headers=default_headers,
+                    timeout_s=int(default_timeout_s),
+                )
+                if show_details:
+                    with st.expander("Request details", expanded=True):
+                        _render_request_details(
+                            method=resp.method,
+                            url=resp.url,
+                            headers=resp.request_headers,
+                            payload=payload_finalize_selected,
+                        )
+                _render_response(resp)
+                _push_history(resp)
+
         st.divider()
         st.markdown("### 4) Verify outputs (`GET /api/v1/versions/{project_id}` and `GET /api/v1/platform-outputs/{project_id}`)")
         c_v, c_o = st.columns(2)
@@ -752,6 +864,26 @@ This tab mirrors your PowerShell curl flow and shows **method / URL / headers / 
                         _render_response(resp)
                 else:
                     _render_response(resp)
+                _push_history(resp)
+            st.markdown("`PATCH /api/v1/versions/{project_id}/{version_number}/keywords`")
+            with st.form("patch_keywords"):
+                kw_version = st.number_input("version_number (keywords)", min_value=1, value=1, step=1)
+                kw_text = st.text_area("keywords (comma-separated)", value="agentic ai,content ops,multi-channel")
+                kw_submit = st.form_submit_button("Patch keywords")
+            if kw_submit:
+                payload_kw = {"keywords": [x.strip() for x in kw_text.split(",") if x.strip()]}
+                path_kw = f"/api/v1/versions/{project_id}/{int(kw_version)}/keywords"
+                resp = api.request(
+                    "PATCH",
+                    path_kw,
+                    json_payload=payload_kw,
+                    headers=default_headers,
+                    timeout_s=int(default_timeout_s),
+                )
+                if show_details:
+                    with st.expander("Request details", expanded=True):
+                        _render_request_details(method=resp.method, url=resp.url, headers=resp.request_headers, payload=payload_kw)
+                _render_response(resp)
                 _push_history(resp)
         with c_o:
             if st.button("GET /api/v1/platform-outputs/{project_id}"):

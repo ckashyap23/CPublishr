@@ -35,14 +35,14 @@ def test_mvp_end_to_end_minimal_flow() -> None:
 
     r = client.post("/api/v1/workflows/runs", json={"project_id": project_id})
     assert r.status_code == 200
-    assert r.json()["status"] in {"completed", "completed_with_editorial"}
+    assert r.json()["status"] == "awaiting_editorial"
 
     versions = client.get(f"/api/v1/versions/{project_id}")
     outputs = client.get(f"/api/v1/platform-outputs/{project_id}")
     assert versions.status_code == 200
     assert outputs.status_code == 200
     assert len(versions.json()["versions"]) >= 1
-    assert len(outputs.json()["outputs"]) >= 1
+    assert outputs.json()["outputs"] == []
 
     latest_v = versions.json()["versions"][-1]["version_number"]
     r = client.post(

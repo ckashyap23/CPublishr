@@ -1,0 +1,110 @@
+:root {
+  --bg: #f5f7fb;
+  --surface: #ffffff;
+  --text: #182230;
+  --muted: #5b6676;
+  --primary: #0b5fff;
+  --border: #d8e0ea;
+  --ok: #e8f5e9;
+  --warn: #fff8e1;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: var(--text); }
+.container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+h1, h2, h3 { margin-top: 0; }
+.grid { display: grid; gap: 12px; }
+.grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+label { font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px; }
+input, select, textarea { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 14px; }
+
+/* Normalize form controls so they render consistently across Windows/browser themes. */
+input, select, textarea, button {
+  font: inherit;
+  line-height: 1.35;
+}
+
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 34px;
+  background-color: #fff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%235b6676' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 8px;
+}
+
+select::-ms-expand {
+  display: none;
+}
+
+option {
+  font-size: 14px;
+}
+textarea { min-height: 96px; resize: vertical; }
+button { border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer; font-weight: 600; }
+button.primary { background: var(--primary); color: #fff; }
+button.secondary { background: #eaf0ff; color: #173f91; }
+button.danger { background: #ffdfe2; color: #8b1d27; }
+button:disabled { opacity: 0.6; cursor: not-allowed; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.tag { background: #eef3ff; border: 1px solid #d6e1ff; border-radius: 999px; padding: 4px 10px; font-size: 12px; }
+.tag button { background: transparent; color: #8b1d27; padding: 0; margin-left: 8px; }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+pre.content { background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 12px; white-space: pre-wrap; max-height: 420px; overflow: auto; }
+.note { color: var(--muted); font-size: 13px; }
+.status.ok { background: var(--ok); padding: 10px; border-radius: 8px; }
+.status.warn { background: var(--warn); padding: 10px; border-radius: 8px; }
+.chat { border: 1px solid var(--border); border-radius: 10px; padding: 10px; max-height: 240px; overflow: auto; background: #fafcff; }
+.msg { margin-bottom: 10px; }
+.msg .who { font-size: 12px; color: var(--muted); }
+.msg .txt { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+.links li { margin-bottom: 8px; }
+.links a { color: #95a0b2; text-decoration: none; pointer-events: none; }
+
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(24, 34, 48, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+
+.loading-panel {
+  width: min(460px, calc(100vw - 32px));
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+  box-shadow: 0 10px 30px rgba(24, 34, 48, 0.15);
+}
+
+.spinner {
+  width: 36px;
+  height: 36px;
+  margin: 0 auto 10px;
+  border-radius: 50%;
+  border: 3px solid #d6e1ff;
+  border-top-color: var(--primary);
+  animation: spin 0.9s linear infinite;
+}
+
+.spinner-inline {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  border-width: 2px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 900px) {
+  .grid.two, .split { grid-template-columns: 1fr; }
+}

@@ -28,3 +28,15 @@ Design principles:
 - Same idea, different packaging.
 - Layered AI architecture.
 - Contract-first integration between components.
+
+## Runtime Prerequisites (Current)
+
+- Python 3.11+ for backend
+- Node.js + npm for React UI
+- PostgreSQL reachable via `DATABASE_URL`
+
+Dependency files:
+- Backend: `backend/pyproject.toml`
+- Backend convenience install: `backend/requirements.txt`
+- React UI: `ui/react/package.json`
+- There is no root `requirements.txt` for backend/runtime dependencies.

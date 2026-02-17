@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ContractModel(BaseModel):
@@ -132,11 +132,14 @@ class DistributionResponse(ContractModel):
 
 ProjectStatus = Literal["draft", "ready", "published"]
 ContentVersionKind = Literal["base", "variant", "editorial"]
+ArtifactType = Literal["reel", "short_video", "voice_over_clip", "text_blog"]
 
 
 class ProjectEntity(ContractModel):
     project_id: str
     status: ProjectStatus
+    final_version_number: int | None = None
+    finalized_at: str | None = None
     created_at: str
 
 
@@ -146,6 +149,11 @@ class ContentVersionEntity(ContractModel):
     version_number: int
     version_kind: ContentVersionKind | None = None
     variant_label: str | None = None
+    keywords: list[str] = Field(default_factory=list)
+    structure_outline: list[str] = Field(default_factory=list)
+    version_stage: Literal["draft", "final"] = "draft"
+    source_version_number: int | None = None
+    updated_at: str | None = None
     content: str
 
 
@@ -164,3 +172,17 @@ class ContentVersionListResponse(ContractModel):
 class PlatformOutputListResponse(ContractModel):
     project_id: str
     outputs: list[PlatformOutputEntity]
+
+
+class ArtifactEntity(ContractModel):
+    artifact_id: str
+    project_id: str
+    artifact_type: ArtifactType
+    title: str
+    content: str
+    metadata: dict
+
+
+class ArtifactListResponse(ContractModel):
+    project_id: str
+    artifacts: list[ArtifactEntity]

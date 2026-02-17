@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     database_url: str
     redis_url: str = "redis://localhost:6379/0"
+    cors_allow_origins: str = "http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:3001,http://localhost:3001"
 
     # DB bootstrap behavior
     db_auto_create: bool = True

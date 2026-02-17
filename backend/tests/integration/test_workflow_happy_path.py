@@ -83,20 +83,18 @@ def test_happy_path_topic_to_outputs_and_editorial_and_publish_job() -> None:
     assert len(base_versions) >= 1
     assert all(v["version_kind"] == "base" for v in base_versions)
 
-    # Full workflow run (uses stored Node 0 bundle)
+    # Full workflow run now pauses for mandatory editorial.
     r = client.post("/api/v1/workflows/runs", json={"project_id": project_id})
     assert r.status_code == 200
     run = r.json()
     assert run["run_id"]
-    assert run["status"] in {"completed", "completed_with_editorial"}
+    assert run["status"] == "awaiting_editorial"
 
-    # Platform outputs list
+    # Platform outputs are generated only after editorial finalize.
     r = client.get(f"/api/v1/platform-outputs/{project_id}")
     assert r.status_code == 200
     outputs = r.json()["outputs"]
-    assert len(outputs) >= 1
-    # content is stored as JSON string
-    json.loads(outputs[0]["content"])
+    assert outputs == []
 
     # Editorial (Node 3) based on latest version number at call time
     latest_now = client.get(f"/api/v1/versions/{project_id}")
@@ -116,6 +114,14 @@ def test_happy_path_topic_to_outputs_and_editorial_and_publish_job() -> None:
     assert ed["draft_version"] == latest_version + 1
     assert "updated_master_document" in ed
 
+    # Platform outputs list (after editorial finalize path)
+    r = client.get(f"/api/v1/platform-outputs/{project_id}")
+    assert r.status_code == 200
+    outputs = r.json()["outputs"]
+    assert len(outputs) >= 1
+    # content is stored as JSON string
+    json.loads(outputs[0]["content"])
+
     # Publish job create (job is persisted but contract returns only status/external_id)
     r = client.post(
         "/api/v1/publishing/jobs",
@@ -123,5 +129,6 @@ def test_happy_path_topic_to_outputs_and_editorial_and_publish_job() -> None:
     )
     assert r.status_code == 200
     assert r.json()["status"] == "published"
+
 
 

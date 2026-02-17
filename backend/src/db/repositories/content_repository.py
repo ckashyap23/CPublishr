@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -25,6 +28,10 @@ class ContentRepository:
         version_number: int,
         version_kind: str = "base",
         variant_label: str | None = None,
+        keywords: list[str] | None = None,
+        structure_outline: list[str] | None = None,
+        version_stage: str = "draft",
+        source_version_number: int | None = None,
     ) -> ContentVersion:
         v = ContentVersion(
             version_id=version_id,
@@ -32,6 +39,11 @@ class ContentRepository:
             version_number=version_number,
             version_kind=version_kind,
             variant_label=variant_label,
+            keywords_json=json.dumps(keywords or [], ensure_ascii=False),
+            structure_outline_json=json.dumps(structure_outline or [], ensure_ascii=False),
+            version_stage=version_stage,
+            source_version_number=source_version_number,
+            updated_at=datetime.utcnow(),
             content=content,
         )
         self.db.add(v)
@@ -80,6 +92,83 @@ class ContentRepository:
         )
         return self.db.execute(stmt).scalars().first()
 
+    def get_latest_final_version(self, project_id: str) -> ContentVersion | None:
+        stmt = (
+            select(ContentVersion)
+            .where(ContentVersion.project_id == project_id)
+            .where(ContentVersion.version_stage == "final")
+            .order_by(ContentVersion.version_number.desc())
+            .limit(1)
+        )
+        return self.db.execute(stmt).scalars().first()
+
+    def update_keywords(self, project_id: str, version_number: int, keywords: list[str]) -> ContentVersion | None:
+        row = self.get_version_by_number(project_id, version_number)
+        if row is None:
+            return None
+        row.keywords_json = json.dumps(keywords or [], ensure_ascii=False)
+        row.updated_at = datetime.utcnow()
+        self.db.add(row)
+        self.db.commit()
+        self.db.refresh(row)
+        return row
+
+    def update_structure_outline(self, project_id: str, version_number: int, structure_outline: list[str]) -> ContentVersion | None:
+        row = self.get_version_by_number(project_id, version_number)
+        if row is None:
+            return None
+        row.structure_outline_json = json.dumps(structure_outline or [], ensure_ascii=False)
+        row.updated_at = datetime.utcnow()
+        self.db.add(row)
+        self.db.commit()
+        self.db.refresh(row)
+        return row
+
+    def set_version_stage(self, project_id: str, version_number: int, version_stage: str) -> ContentVersion | None:
+        row = self.get_version_by_number(project_id, version_number)
+        if row is None:
+            return None
+        row.version_stage = version_stage
+        row.updated_at = datetime.utcnow()
+        self.db.add(row)
+        self.db.commit()
+        self.db.refresh(row)
+        return row
+
+    def clear_final_stage(self, project_id: str) -> int:
+        rows = (
+            self.db.query(ContentVersion)
+            .filter(ContentVersion.project_id == project_id)
+            .filter(ContentVersion.version_stage == "final")
+            .all()
+        )
+        for row in rows:
+            row.version_stage = "draft"
+            row.updated_at = datetime.utcnow()
+            self.db.add(row)
+        self.db.commit()
+        return len(rows)
+
+    @staticmethod
+    def decode_keywords(row: ContentVersion) -> list[str]:
+        try:
+            data = json.loads(row.keywords_json or "[]")
+            if isinstance(data, list):
+                return [str(x) for x in data]
+        except json.JSONDecodeError:
+            pass
+        return []
+
+    @staticmethod
+    def decode_structure_outline(row: ContentVersion) -> list[str]:
+        try:
+            data = json.loads(row.structure_outline_json or "[]")
+            if isinstance(data, list):
+                return [str(x) for x in data]
+        except json.JSONDecodeError:
+            pass
+        return []
+
     def create_platform_output(
         self,
         *,
@@ -121,3 +210,4 @@ class ContentRepository:
         rows = self.db.query(PlatformOutput).filter(PlatformOutput.project_id == project_id).delete()
         self.db.commit()
         return int(rows or 0)
+

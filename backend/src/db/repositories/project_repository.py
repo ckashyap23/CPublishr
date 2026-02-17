@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.db.models.artifact import Artifact
 from src.db.models.content_version import ContentVersion
 from src.db.models.editorial_session import EditorialSession
 from src.db.models.platform_output import PlatformOutput
@@ -51,6 +53,11 @@ class ProjectRepository:
             .filter(EditorialSession.project_id == project_id)
             .delete(synchronize_session=False)
         )
+        deleted_artifacts = (
+            self.db.query(Artifact)
+            .filter(Artifact.project_id == project_id)
+            .delete(synchronize_session=False)
+        )
         deleted_project_rows = (
             self.db.query(Project)
             .filter(Project.project_id == project_id)
@@ -62,6 +69,7 @@ class ProjectRepository:
             "platform_outputs": int(deleted_outputs or 0),
             "publish_jobs": int(deleted_jobs or 0),
             "editorial_sessions": int(deleted_sessions or 0),
+            "artifacts": int(deleted_artifacts or 0),
             "projects": int(deleted_project_rows or 0),
         }
 
@@ -87,3 +95,12 @@ class ProjectRepository:
     def list_projects(self, limit: int = 50) -> list[Project]:
         stmt = select(Project).order_by(Project.created_at.desc()).limit(limit)
         return list(self.db.execute(stmt).scalars().all())
+
+    def set_final_version(self, project_id: str, final_version_number: int) -> Project:
+        p = self.get_or_create(project_id)
+        p.final_version_number = int(final_version_number)
+        p.finalized_at = datetime.utcnow()
+        self.db.add(p)
+        self.db.commit()
+        self.db.refresh(p)
+        return p

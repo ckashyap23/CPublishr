@@ -1,29 +1,38 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_db
 from src.contracts.prd import ContentVersionEntity, ContentVersionKind, ContentVersionListResponse
 from src.db.repositories.content_repository import ContentRepository
+from src.schemas.workflow import VersionKeywordsPatchRequest, VersionKeywordsPatchResponse
+from src.utils.time import to_utc_iso
 
 router = APIRouter()
 
 
+def _to_content_version_entity(repo: ContentRepository, v) -> ContentVersionEntity:
+    return ContentVersionEntity(
+        version_id=v.version_id,
+        project_id=v.project_id,
+        version_number=v.version_number,
+        version_kind=v.version_kind,
+        variant_label=v.variant_label,
+        keywords=repo.decode_keywords(v),
+        structure_outline=repo.decode_structure_outline(v),
+        version_stage=v.version_stage,
+        source_version_number=v.source_version_number,
+        updated_at=to_utc_iso(v.updated_at) if v.updated_at else None,
+        content=v.content,
+    )
+
+
 @router.get("/{project_id}", response_model=ContentVersionListResponse)
 def list_versions(project_id: str, db: Session = Depends(get_db)) -> ContentVersionListResponse:
-    versions = ContentRepository(db).list_versions(project_id)
+    repo = ContentRepository(db)
+    versions = repo.list_versions(project_id)
     return ContentVersionListResponse(
         project_id=project_id,
-        versions=[
-            ContentVersionEntity(
-                version_id=v.version_id,
-                project_id=v.project_id,
-                version_number=v.version_number,
-                version_kind=v.version_kind,
-                variant_label=v.variant_label,
-                content=v.content,
-            )
-            for v in versions
-        ],
+        versions=[_to_content_version_entity(repo, v) for v in versions],
     )
 
 
@@ -33,18 +42,28 @@ def list_versions_by_kind(
     version_kind: ContentVersionKind,
     db: Session = Depends(get_db),
 ) -> ContentVersionListResponse:
-    versions = ContentRepository(db).list_versions_by_kind(project_id, version_kind)
+    repo = ContentRepository(db)
+    versions = repo.list_versions_by_kind(project_id, version_kind)
     return ContentVersionListResponse(
         project_id=project_id,
-        versions=[
-            ContentVersionEntity(
-                version_id=v.version_id,
-                project_id=v.project_id,
-                version_number=v.version_number,
-                version_kind=v.version_kind,
-                variant_label=v.variant_label,
-                content=v.content,
-            )
-            for v in versions
-        ],
+        versions=[_to_content_version_entity(repo, v) for v in versions],
+    )
+
+
+@router.patch("/{project_id}/{version_number}/keywords", response_model=VersionKeywordsPatchResponse)
+def patch_version_keywords(
+    project_id: str,
+    version_number: int,
+    payload: VersionKeywordsPatchRequest,
+    db: Session = Depends(get_db),
+) -> VersionKeywordsPatchResponse:
+    repo = ContentRepository(db)
+    updated = repo.update_keywords(project_id, version_number, payload.keywords)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Content version not found")
+    return VersionKeywordsPatchResponse(
+        project_id=project_id,
+        version_number=version_number,
+        keywords=repo.decode_keywords(updated),
+        updated=True,
     )

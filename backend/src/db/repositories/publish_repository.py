@@ -43,3 +43,4 @@ class PublishRepository:
     def list_jobs_for_project(self, project_id: str, limit: int = 50) -> list[PublishJob]:
         stmt = select(PublishJob).where(PublishJob.project_id == project_id).limit(limit)
         return list(self.db.execute(stmt).scalars().all())
+

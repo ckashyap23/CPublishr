@@ -126,7 +126,7 @@ Inputs:
 
 What to generate:
 - BASE master_document: canonical markdown based on inputs and audience constraints.
-- core_arguments: extract 10-20 critical keywords/short phrases from the BASE master_document.
+- core_arguments: extract 5-10 critical keywords/short phrases most relevant to the topic, core idea and user content.
 - structure_outline: the H2 headings in order.
 """.strip()
 
@@ -210,7 +210,9 @@ Remember: No new facts beyond research_summary. Unknown -> "not specified". Core
                             out["variants"].append(
                                 {
                                     "id": spec.id,
-                                    "label": str(v_parsed.get("label") or spec.label),
+                                    # Keep canonical label from VariantSpec to avoid LLM drift
+                                    # (e.g., model returning topic title as label).
+                                    "label": spec.label,
                                     "levers": {
                                         "weight_user": float((v_parsed.get("levers") or {}).get("weight_user") or spec.weight_user),
                                         "weight_research": float((v_parsed.get("levers") or {}).get("weight_research") or spec.weight_research),

@@ -63,9 +63,8 @@ Endpoint:
 
 Because `publish_jobs` schema changed, existing tables may need migration.
 
-`create_all()` does not alter existing columns. For local/dev if needed:
-1. drop/recreate `publish_jobs` table, or
-2. add a migration.
+Startup now runs a lightweight Postgres compatibility patch (`ALTER TABLE ... IF NOT EXISTS`) for recent added columns.
+For larger schema changes, still use explicit migrations.
 
 ## Remaining Work to Reach Real Publishing
 

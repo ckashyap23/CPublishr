@@ -10,3 +10,4 @@ def test_node0_context_bundle_schema_example() -> None:
     ContextBundleV1.model_validate(payload["context_bundle"])
 
 
+

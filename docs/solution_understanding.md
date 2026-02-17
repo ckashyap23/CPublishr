@@ -1,228 +1,162 @@
 # Solution Understanding
 
-This document explains how the current backend works end-to-end, based on the live code in this repository.
+This document reflects the current backend and React UI behavior in this repository.
 
-## 1. Product Scope (Current MVP)
+## 1. Current End-to-End Workflow
 
-The system supports a contract-first content workflow:
-1. Node 0: Topic initialization
-2. Node 1: Research synthesis
-3. Node 2: Master content generation (base + optional variants)
-4. Node 3: Editorial refinement
-5. Platform adaptation and publish-stub testing
+The backend flow is now:
+1. Node 0: Initialize topic/project context (`POST /api/v1/projects/`)
+2. Node 1: Research (`/workflows/nodes/research`)
+3. Node 2: Master content base + variants (`/workflows/nodes/master`)
+4. Editorial is mandatory before downstream generation.
+5. Node 4: Artifact generation runs after editorial finalization.
+6. Platform adapters run after editorial finalization and write `platform_outputs`.
+7. Publish stub can create publish jobs only when platform output exists.
 
-Design intent in current code:
-- Keep component contracts strict and testable.
-- Keep endpoints separately testable.
-- Allow asynchronous team work by stabilizing node boundaries.
+`POST /api/v1/workflows/runs` executes Node 0-2 and returns:
+- `status = "awaiting_editorial"`
 
-## 2. Runtime Architecture
+It does not auto-finalize editorial.
 
-Backend stack:
-- Python + FastAPI
-- SQLAlchemy ORM
-- Postgres via `DATABASE_URL`
-- Optional Azure OpenAI for Node logic and editorial refinement
+## 2. API Endpoints (Current)
 
-Entry point:
-- `backend/src/main.py`
+Health:
+- `GET /healthz`
+- `GET /api/v1/health/`
 
-Startup behavior:
-- Loads settings from `.env`.
-- Registers v1 API router.
-- Runs `create_all()` on startup when `DB_AUTO_CREATE=true`.
+Projects:
+- `POST /api/v1/projects/`
+- `GET /api/v1/projects/{project_id}`
 
-Important:
-- `create_all()` creates missing tables but does not alter existing columns.
-- Schema changes still require SQL migration/ALTER for existing DBs.
+Workflow:
+- `POST /api/v1/workflows/runs`
+- `GET /api/v1/workflows/nodes/research/{project_id}`
+- `POST /api/v1/workflows/nodes/research`
+- `GET /api/v1/workflows/nodes/master/{project_id}`
+- `POST /api/v1/workflows/nodes/master`
 
-## 3. API Surface (v1)
+Editorial:
+- `POST /api/v1/workflows/nodes/editorial`
+- `POST /api/v1/workflows/nodes/editorial/session/start`
+- `POST /api/v1/workflows/nodes/editorial/session/{session_id}/iterate`
+- `POST /api/v1/workflows/nodes/editorial/session/{session_id}/finalize`
+- `POST /api/v1/workflows/nodes/editorial/finalize-direct`
+- `POST /api/v1/workflows/nodes/editorial/regenerate-outline`
+- `POST /api/v1/workflows/nodes/editorial/save-inline`
+- `POST /api/v1/workflows/nodes/editorial/feedback/preview`
+- `POST /api/v1/workflows/nodes/editorial/finalize-selected`
 
-Router:
-- `backend/src/api/v1/router.py`
+Artifacts:
+- `POST /api/v1/workflows/nodes/artifacts/generate`
+- `GET /api/v1/artifacts/{project_id}`
+- `GET /api/v1/artifacts/{project_id}/{artifact_type}`
 
-Endpoints:
-- `POST /api/v1/projects/`: Run Node 0, clear prior project-scoped data for the same `project_id`, and persist fresh context bundle.
-- `GET /api/v1/projects/{project_id}`: Fetch project metadata.
-- `POST /api/v1/workflows/runs`: Run default flow (Node 0->1->2 + adapters), optionally auto-run editorial.
-- `GET /api/v1/workflows/nodes/research/{project_id}`: Run Node 1 independently.
-- `POST /api/v1/workflows/nodes/research`: Run Node 1 from explicit payload (no full workflow run required).
-- `GET /api/v1/workflows/nodes/master/{project_id}`: Run Node 2 independently and persist base + variants.
-- `POST /api/v1/workflows/nodes/master`: Run Node 2 from explicit payload; optional research injection.
-- `POST /api/v1/workflows/nodes/editorial`: Single-pass editorial.
-- `POST /api/v1/workflows/nodes/editorial/session/start`: Start iterative editorial session.
-- `POST /api/v1/workflows/nodes/editorial/session/{session_id}/iterate`: Iterate session draft.
-- `POST /api/v1/workflows/nodes/editorial/session/{session_id}/finalize`: Finalize session to new content version.
-- `GET /api/v1/versions/{project_id}`: List versions with metadata.
-- `GET /api/v1/versions/{project_id}/{version_kind}`: List versions for one kind (`base`, `variant`, `editorial`).
-- `GET /api/v1/platform-outputs/{project_id}`: List adapter outputs.
-- `POST /api/v1/publishing/jobs`: Publish stub (validated internal payload path).
-- `GET /healthz`, `GET /api/v1/health/`: Health checks.
+Versions:
+- `GET /api/v1/versions/{project_id}`
+- `GET /api/v1/versions/{project_id}/{version_kind}`
+- `PATCH /api/v1/versions/{project_id}/{version_number}/keywords`
 
-## 4. Contract-First Model
-
-Source of truth:
-- `backend/src/contracts/prd.py`
-
-Validation examples:
-- `backend/contracts/examples/*.json`
-
-Contract tests:
-- `backend/tests/unit/test_prd_contract_examples.py`
-- `backend/tests/unit/test_context_bundle_schema.py`
-
-### Key active contracts
-
-Node 0 request (`TopicInitializationRequest`):
-- Required: `project_id`, `topic_title`, `core_idea`, `tone_preference`, `distribution_targets`
-- Optional: `user_content`, `target_audience`, `content_depth`
-
-Node 1 response (`ResearchTrendResponse`):
-- `research_summary`, `emerging_tools`, `recent_discussions`, `key_insights`, `contrarian_angles`
-
-Node 2 response (`MasterContentResponse`):
-- `master_document`
-- `structure_outline` (section map semantics)
-- `core_arguments`
-- Optional `master_variants[]` where each variant includes:
-  - `label`
-  - `master_document`
-  - `structure_outline`
-  - `core_arguments`
-
-Node 3 response (`EditorialResponse`):
-- `draft_version`, `updated_master_document`, `change_log`
-
-Version entity (`ContentVersionEntity`):
-- `version_id`, `project_id`, `version_number`, `content`
-- Optional metadata fields:
-  - `version_kind` (`base | variant | editorial`)
-  - `variant_label`
-
-## 5. Node-by-Node Behavior
-
-### Node 0 (`topic_initialization.py`)
-- Normalizes topic title (optionally via LLM).
-- Builds canonical `context_bundle`.
-- Validates against `ContextBundleV1` schema.
-- Marks a fresh run boundary for the project by clearing prior project-scoped rows:
-  - `content_versions`
-  - `platform_outputs`
-  - `publish_jobs`
-  - `editorial_sessions`
-  - existing `projects` row (recreated during init)
-- Persists into project `context_json`.
-
-### Node 1 (`research_trends.py`)
-- Reads `context_bundle` from state.
-- Produces structured research payload.
-- Uses fallback deterministic output if LLM unavailable/fails.
-- Stores result in `context.state["research"]`.
-
-### Node 2 (`master_content.py`)
-- Reads `context_bundle` + `research`.
-- Produces base master document and optional variants.
-- Ensures `structure_outline` is section-map semantics for base and variants.
-- Returns strict contract-compatible output.
-
-### Node 3 (`editorial.py` + engine session methods)
-- Edits selected version content.
-- Supports both single-pass and iterative session workflows.
-- Uses global `next_version_number` when persisting editorial output.
-- Persisted editorial rows are marked `version_kind="editorial"`.
-
-## 6. Orchestration and Persistence
-
-Engine:
-- `backend/src/services/orchestration/engine.py`
-
-Default run (`run_default_flow`):
-1. Node 0 -> persist `context_bundle` to project
-2. Node 1
-3. Node 2
-4. Persist base content version
-5. Persist each variant as separate content version
-6. Run adapters for distribution targets
-7. Persist adapter outputs
-
-Editorial targeting in workflow run:
-- `POST /workflows/runs` with `run_editorial=true` selects latest `base` version first.
-- Falls back to latest overall version if no base exists.
-
-## 7. Database Model (Current)
-
-Tables:
-- `projects`
-  - includes `context_json` for persisted Node 0 bundle
-- `content_versions`
-  - includes `version_kind` and `variant_label`
-- `platform_outputs`
-- `publish_jobs`
-- `editorial_sessions`
-
-Current persistence semantics:
-- Base master content -> `content_versions` (`version_kind="base"`)
-- Variant master content -> `content_versions` (`version_kind="variant"`, with `variant_label`)
-- Editorial outputs -> `content_versions` (`version_kind="editorial"`)
-
-## 8. Adapter and Publishing Path
-
-Adapters:
-- `backend/src/services/platforms/adapters/*`
-- Input: base master document + context
-- Output: contract-compliant per-platform payloads
-- Persisted in `platform_outputs` as JSON string
+Platform outputs:
+- `GET /api/v1/platform-outputs/{project_id}`
 
 Publishing:
-- Current implementation is a validated publish stub.
-- Creates `publish_jobs` only if matching platform output exists.
-- Returns `DistributionResponse` with stub external id.
+- `POST /api/v1/publishing/jobs`
 
-## 9. Testing Strategy
+## 3. Core Data Model
 
-Unit:
-- Contract example validation
-- Context bundle schema validation
-- Health endpoint checks
+`projects`:
+- `project_id`
+- `status`
+- `context_json` (Node 0 context bundle)
+- `final_version_number`
+- `finalized_at`
+- `created_at`
 
-Integration:
-- Full happy-path flow
-- MVP end-to-end flow
-- Editorial version-selection behavior:
-  - workflow auto-editorial chooses base first
-  - editorial persists with global next version number
+`content_versions`:
+- `version_id`
+- `project_id`
+- `version_number`
+- `version_kind` (`base | variant | editorial`)
+- `variant_label`
+- `keywords_json`
+- `structure_outline_json`
+- `version_stage` (`draft | final`)
+- `source_version_number`
+- `updated_at`
+- `content`
 
-## 10. UI for Manual Backend Testing
+`editorial_sessions`:
+- tracks temporary working content until finalized
 
-Streamlit tester:
-- `ui/streamlit/app.py`
+`artifacts`:
+- generated from finalized editorial content
 
-Capabilities:
-- Curl-aligned flow from health -> node runs -> storage -> publish
-- Separate API console
-- Request/response visibility for manual debugging
+`platform_outputs`:
+- adapter outputs keyed by project/platform
 
-Backend URL is configurable in sidebar (default currently points to `127.0.0.1:8010` in code).
+`publish_jobs`:
+- publish stub jobs with output linkage and snapshot
 
-## 11. Team Collaboration Boundaries
+## 4. Versioning Semantics
 
-Recommended ownership model:
-- Node 0/contract boundary: context schema stability
-- Node 1: research internals, fixed output shape
-- Node 2: content quality and variant generation, fixed response contract
-- Node 3: editorial quality/session behavior, fixed editorial contracts
-- Adapters: platform transformation logic, fixed adapter contracts
+Base/variant generation:
+- Node 2 writes one `base` version and zero or more `variant` versions.
 
-Rule of thumb:
-- Change internals freely.
-- Change external contracts only with coordinated update to:
-  1. `prd.py`
-  2. example JSON files
-  3. contract tests
-  4. relevant handoff docs
+Editorial draft/final:
+- Regenerate/save-inline create `editorial` drafts.
+- `save-inline` accepts optional `version_label`; when provided, it is persisted as `variant_label` on the saved editorial draft.
+- Finalization marks one selected version as `version_stage="final"`.
+- Previous final version(s) are cleared back to draft.
+- Project final pointer is written to `projects.final_version_number`.
 
-## 12. Known Operational Notes
+Variant label carry-forward:
+- If editorial source is `variant` or `editorial`, `variant_label` is retained.
+- If source is `base`, `variant_label` remains `null`.
 
-- Existing DBs must be altered manually for new columns (`create_all()` does not mutate existing schema).
-- FastAPI startup event currently uses `on_event("startup")` (deprecation warning is known, not blocking).
-- Streamlit and backend can run on different ports; base URL in UI must match active backend port.
+## 5. Contracts and Validation
+
+Primary contract file:
+- `backend/src/contracts/prd.py`
+
+Node-level request/response schemas:
+- `backend/src/schemas/workflow.py`
+
+Node contracts used by team boundaries:
+- Node 0: `TopicInitializationRequest/Response`
+- Node 1: `ResearchTrendResponse`
+- Node 2: `MasterContentResponse` + `MasterContentVariant`
+- Node 3: `EditorialRequest/Response`
+
+## 6. Orchestration Notes
+
+Key orchestrator:
+- `backend/src/services/orchestration/engine.py`
+
+Responsibilities:
+- executes node sequence
+- persists content versions and metadata
+- persists project final pointer
+- generates artifacts post-editorial
+- regenerates adapter outputs post-editorial
+
+## 7. React UI
+
+Primary UI files:
+- `ui/react/src/App.jsx`
+- `ui/react/src/styles.css`
+- `ui/react/README.md`
+
+The UI supports:
+- workflow run (Node 0-2)
+- generate loader overlay for long-running workflow calls
+- version selection and in-place keyword patching
+- direct finalize selected version
+- inline edit/save/finalize flow
+- iterate preview/save/finalize flow
+- save-time version naming (prompt on save click)
+
+## 8. Important Operational Notes
+
+- Startup uses `create_all()` and now includes a lightweight Postgres `ALTER TABLE ... IF NOT EXISTS` compatibility patch for the newly added columns.
+- Full integration tests are currently Postgres/.env-dependent by design.
+- `backend/.env` contains secrets and is now ignored by `.gitignore`; do not commit real credentials.

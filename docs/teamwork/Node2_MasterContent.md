@@ -59,12 +59,21 @@ Optional Node 0 inputs:
 
 Node 2 output is used by:
 - Editorial flow as source content.
-- Adapter generation (base document + supporting context fields).
+- Adapter generation indirectly, after editorial finalization (finalized editorial content is the adapter input).
 - Content version persistence.
 
 Persistence behavior:
-- Base document saved as `content_versions` row with `version_kind="base"`.
-- Each variant saved as separate `content_versions` row with `version_kind="variant"` and `variant_label`.
+- Base document saved as `content_versions` row with:
+  - `version_kind="base"`
+  - `version_stage="draft"`
+  - `keywords_json` from `core_arguments`
+  - `structure_outline_json` from `structure_outline`
+- Each variant saved as separate `content_versions` row with:
+  - `version_kind="variant"`
+  - `variant_label`
+  - `version_stage="draft"`
+  - `source_version_number=<base version number>`
+  - its own `keywords_json` + `structure_outline_json`
 
 ## Required Output Example
 
@@ -99,6 +108,7 @@ Persistence behavior:
 - Do not change field types.
 - Do not repurpose `structure_outline` back to variant labels.
 - Do not bypass `context.state["master"]` output handoff.
+- Keep `core_arguments` populated, since this now maps to persisted version keywords.
 
 ## Testing Checklist
 

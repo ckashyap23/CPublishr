@@ -1,171 +1,108 @@
 # Node3 Editorial - Team Handoff Guide
 
-This document defines how to improve Node 3 (`editorial.py`) without breaking API and workflow compatibility.
+This document reflects the current editorial implementation and safe change boundaries.
 
 ## Goal
 
-Own the editorial logic for:
-- single-pass edits
-- iterative draft refinement
-- finalizing accepted content into versioned master content
+Support selection, iteration, and finalization of any content version (base, variant, or editorial) while preserving contracts and persistence semantics.
 
-while preserving all existing contracts.
+## Endpoint Surface
 
-## Current Files and Responsibilities
+Core editorial:
+- `POST /api/v1/workflows/nodes/editorial`
+- `POST /api/v1/workflows/nodes/editorial/finalize-direct`
 
-Primary node file:
+Session workflow:
+- `POST /api/v1/workflows/nodes/editorial/session/start`
+- `POST /api/v1/workflows/nodes/editorial/session/{session_id}/iterate`
+- `POST /api/v1/workflows/nodes/editorial/session/{session_id}/finalize`
+
+Explicit MVP editorial controls:
+- `POST /api/v1/workflows/nodes/editorial/regenerate-outline`
+- `POST /api/v1/workflows/nodes/editorial/save-inline`
+- `POST /api/v1/workflows/nodes/editorial/feedback/preview`
+- `POST /api/v1/workflows/nodes/editorial/finalize-selected`
+
+Keyword editing (no new version):
+- `PATCH /api/v1/versions/{project_id}/{version_number}/keywords`
+
+## Current Data Semantics
+
+Every editorial-created row is stored in `content_versions` with:
+- `version_kind="editorial"`
+- `version_stage`:
+  - `draft` for regenerate/save-inline
+  - `final` for finalize operations
+- `source_version_number` from the version being edited
+- `variant_label` carry-forward rules:
+  - source kind `base` -> `variant_label=None`
+  - source kind `variant` or `editorial` -> carry source `variant_label`
+
+Project final pointer:
+- On finalization, `projects.final_version_number` and `projects.finalized_at` are updated.
+- Existing final version(s) are reset to draft before marking the new final.
+
+## What Each Endpoint Does
+
+`/nodes/editorial`:
+- single-pass edit + persist finalized editorial version.
+
+`/nodes/editorial/session/*`:
+- stores temporary working content in `editorial_sessions`.
+- finalization writes one finalized editorial version.
+
+`/nodes/editorial/regenerate-outline`:
+- LLM-guided rewrite against provided section outline.
+- persists a new editorial draft version.
+
+`/nodes/editorial/save-inline`:
+- persists user-edited content as a new editorial draft version.
+- accepts optional `version_label` and persists it as `variant_label` on the created editorial draft.
+
+`/nodes/editorial/feedback/preview`:
+- LLM preview only.
+- no version persistence.
+
+`/nodes/editorial/finalize-selected`:
+- marks selected existing version as final (no new version row).
+- runs downstream Node 4 + adapters.
+
+## Files You Can Safely Change
+
+Primary:
 - `backend/src/services/orchestration/nodes/editorial.py`
-
-Orchestration and session lifecycle:
 - `backend/src/services/orchestration/engine.py`
 
-Editorial session persistence:
+Session persistence:
 - `backend/src/db/models/editorial_session.py`
 - `backend/src/db/repositories/editorial_session_repository.py`
 
-Endpoints:
-- `backend/src/api/v1/endpoints/workflows.py`
-
-Schemas (API/session payloads):
+API schemas and routing:
 - `backend/src/schemas/workflow.py`
-- `backend/src/contracts/prd.py` (`EditorialRequest`, `EditorialResponse`)
+- `backend/src/api/v1/endpoints/workflows.py`
+- `backend/src/api/v1/endpoints/versions.py` (keyword patch)
 
-## How Node 3 Works Today
+## Contract Rules (Do Not Break)
 
-### Input to Node 3
-
-Node receives:
-- `context.input_payload`
-  - `project_id`
-  - `current_version`
-  - `editor_actions[]`
-  - `user_feedback`
-- `context.state["current_master_document"]`
-  - current content to edit
-
-### Processing
-
-1. Build action log from `editor_actions`.
-2. Apply editorial update with deterministic fallback formatting.
-3. If Azure OpenAI is configured, ask the LLM to return strict JSON with:
-   - `updated_master_document`
-   - `change_log`
-4. Fallback remains active if LLM call fails.
-
-### Output from Node 3
-
-Must return exactly:
-
-```json
-{
-  "draft_version": 2,
-  "updated_master_document": "markdown...",
-  "change_log": ["..."]
-}
-```
-
-## Two Operational Modes
-
-### Mode A: Single-Pass Editorial
-
-Endpoint:
-- `POST /api/v1/workflows/nodes/editorial`
-
-Flow:
-1. Load requested version from `content_versions`.
-2. Run Node 3 once.
-3. Persist new `ContentVersion` immediately with `version_kind="editorial"`.
-
-### Mode B: Iterative Session Editorial
-
-Endpoints:
-1. `POST /api/v1/workflows/nodes/editorial/session/start`
-2. `POST /api/v1/workflows/nodes/editorial/session/{session_id}/iterate`
-3. `POST /api/v1/workflows/nodes/editorial/session/{session_id}/finalize`
-
-Flow:
-1. Start session from base version and first comment.
-2. Iterate with additional comments while storing temporary `working_content`.
-3. Finalize writes accepted content as a new `ContentVersion`.
-
-## Non-Negotiable Contract Rules
-
-Do not change these shapes without cross-team approval:
-
-### PRD Editorial Contract
+Keep these stable unless coordinated:
 - `EditorialRequest`
 - `EditorialResponse`
+- version endpoint response shape (`ContentVersionEntity`)
+- schema payloads in `workflow.py` used by UI and other team members
 
-Required output keys:
-- `draft_version: int`
-- `updated_master_document: str`
-- `change_log: list[str]`
+## Recommended Improvements
 
-Note:
-- persisted editorial version number is assigned by repository next-version logic (global project sequence).
+1. Stronger section-targeted editing in `editorial.py`.
+2. Better diff-quality `change_log`.
+3. Add guardrails for empty/degenerate edited content.
+4. Improve outline-preserving rewrite behavior for regenerate-outline.
+5. Add tests for:
+   - finalize-selected pointer updates
+   - variant-label carry-forward on editorial chain
+   - feedback preview non-persistence
 
-### Session API Schemas (workflow.py)
-Keep fields stable for:
-- `EditorialSessionStartRequest/Response`
-- `EditorialSessionIterateRequest/Response`
-- `EditorialSessionFinalizeResponse`
+## Done Criteria
 
-## Recommended Improvement Areas
-
-1. Better edit targeting
-- Section-aware editing instead of full-document rewrite.
-- Respect `target_section` strongly.
-
-2. Better iteration memory
-- Track what changed each iteration.
-- Avoid reintroducing previous issues.
-
-3. Quality gates
-- Validate markdown structure before persisting.
-- Ensure no empty/degenerate output.
-
-4. Diff and audit quality
-- Improve `change_log` with meaningful, user-readable updates.
-
-5. LLM robustness
-- Stronger prompt format.
-- Structured JSON parsing guards.
-- Reliable fallback behavior on API failures/timeouts.
-
-## Suggested Internal Architecture
-
-Keep `editorial.py` as orchestration logic and move heavy internals to:
-- `backend/src/services/editorial/formatter.py`
-- `backend/src/services/editorial/diff.py`
-- `backend/src/services/editorial/quality.py`
-- `backend/src/services/editorial/prompting.py`
-
-This keeps Node 3 readable and testable.
-
-## Test Checklist
-
-Minimum:
-- Single-pass endpoint creates new version.
-- Session start creates temporary draft.
-- Session iterate updates draft and increments iteration.
-- Session finalize persists final version.
-- Output always validates as `EditorialResponse`.
-
-Recommended tests:
-- Empty/invalid feedback handling.
-- LLM failure fallback path.
-- Repeated finalize/iterate invalid state handling.
-
-## Coordination Rules (So Others Are Not Blocked)
-
-- Do not change Node 3 output keys/types.
-- Do not change how final version is persisted on finalize.
-- Keep Node 3 compatible with Node 2 output markdown.
-- Avoid introducing dependencies that require Node 1/2 schema changes.
-
-## Done Criteria for Node 3 Owner
-
-- Editorial quality improved (single-pass + iterative).
-- Contracts unchanged and valid.
-- Session lifecycle stable under repeated use.
-- Finalized content is reliably persisted as new master version.
+- Editorial endpoints preserve current contracts.
+- Finalization reliably sets one final pointer/version.
+- Downstream artifact + platform output generation still works after finalization.

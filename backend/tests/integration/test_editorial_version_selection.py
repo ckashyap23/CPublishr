@@ -4,12 +4,10 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
-from src.contracts.prd import EditorialResponse
 from src.db.init_db import create_all
 from src.db.repositories.content_repository import ContentRepository
 from src.db.session import SessionLocal, get_engine, init_engine
 from src.main import app
-from src.services.orchestration.engine import OrchestrationEngine
 from src.utils.ids import new_id
 
 
@@ -41,7 +39,7 @@ def _seed_version(
         )
 
 
-def test_workflow_run_editorial_targets_latest_base_version(monkeypatch) -> None:
+def test_workflow_run_status_is_awaiting_editorial() -> None:
     client = _client()
     project_id = f"proj_base_select_{uuid4().hex[:8]}"
 
@@ -71,22 +69,9 @@ def test_workflow_run_editorial_targets_latest_base_version(monkeypatch) -> None
         content="# Variant",
     )
 
-    captured: dict[str, int] = {}
-
-    def _fake_run_default_flow(self: OrchestrationEngine, payload) -> tuple[str, str]:
-        return "run_stub", "completed"
-
-    def _fake_run_editorial(self: OrchestrationEngine, payload):
-        captured["current_version"] = payload.current_version
-        return EditorialResponse(draft_version=999, updated_master_document="# Edited", change_log=["stub"])
-
-    monkeypatch.setattr(OrchestrationEngine, "run_default_flow", _fake_run_default_flow)
-    monkeypatch.setattr(OrchestrationEngine, "run_editorial", _fake_run_editorial)
-
-    r = client.post("/api/v1/workflows/runs", json={"project_id": project_id, "run_editorial": True})
+    r = client.post("/api/v1/workflows/runs", json={"project_id": project_id})
     assert r.status_code == 200
-    assert r.json()["status"] == "completed_with_editorial"
-    assert captured["current_version"] == 1
+    assert r.json()["status"] == "awaiting_editorial"
 
 
 def test_editorial_uses_global_next_version_number() -> None:
@@ -138,3 +123,104 @@ def test_editorial_uses_global_next_version_number() -> None:
     assert len(versions) >= 1
     assert versions[-1]["version_number"] == 3
     assert versions[-1]["version_kind"] == "editorial"
+
+
+def test_editorial_session_finalize_carries_variant_label_for_variant_source() -> None:
+    client = _client()
+    project_id = f"proj_editorial_session_variant_{uuid4().hex[:8]}"
+
+    r = client.post(
+        "/api/v1/projects/",
+        json={
+            "project_id": project_id,
+            "topic_title": "Editorial session lineage",
+            "core_idea": "Finalize should carry variant label when source is variant.",
+            "user_content": None,
+            "target_audience": "builders",
+            "content_depth": "surface",
+            "tone_preference": "professional",
+            "distribution_targets": ["linkedin"],
+        },
+    )
+    assert r.status_code == 200
+
+    variant_label = "Balanced (50/50) - Problem/Solution"
+    _seed_version(project_id, version_number=1, version_kind="base", content="# Base v1")
+    _seed_version(
+        project_id,
+        version_number=2,
+        version_kind="variant",
+        variant_label=variant_label,
+        content="# Variant v2",
+    )
+
+    # Start session from variant version_number=2.
+    r = client.post(
+        "/api/v1/workflows/nodes/editorial/session/start",
+        json={
+            "project_id": project_id,
+            "current_version": 2,
+            "user_comment": "Tighten this variant for publishing.",
+        },
+    )
+    assert r.status_code == 200
+    session_id = r.json()["session_id"]
+
+    # Finalize session and verify persisted editorial row carries source variant_label.
+    r = client.post(f"/api/v1/workflows/nodes/editorial/session/{session_id}/finalize")
+    assert r.status_code == 200
+    final_version = r.json()["final_version"]
+
+    with SessionLocal() as db:
+        persisted = ContentRepository(db).get_version_by_number(project_id, int(final_version))
+        assert persisted is not None
+        assert persisted.version_kind == "editorial"
+        assert persisted.variant_label == variant_label
+
+
+def test_editorial_direct_finalize_generates_artifacts_and_carries_variant_label() -> None:
+    client = _client()
+    project_id = f"proj_editorial_direct_{uuid4().hex[:8]}"
+
+    r = client.post(
+        "/api/v1/projects/",
+        json={
+            "project_id": project_id,
+            "topic_title": "Editorial direct finalize",
+            "core_idea": "Direct finalize without iterations.",
+            "user_content": None,
+            "target_audience": "builders",
+            "content_depth": "surface",
+            "tone_preference": "professional",
+            "distribution_targets": ["linkedin"],
+        },
+    )
+    assert r.status_code == 200
+
+    variant_label = "Balanced (50/50) - Problem/Solution"
+    _seed_version(project_id, version_number=1, version_kind="base", content="# Base v1")
+    _seed_version(
+        project_id,
+        version_number=2,
+        version_kind="variant",
+        variant_label=variant_label,
+        content="# Variant v2",
+    )
+
+    r = client.post(
+        "/api/v1/workflows/nodes/editorial/finalize-direct",
+        json={"project_id": project_id, "current_version": 2},
+    )
+    assert r.status_code == 200
+    final_version = r.json()["final_version"]
+
+    with SessionLocal() as db:
+        persisted = ContentRepository(db).get_version_by_number(project_id, int(final_version))
+        assert persisted is not None
+        assert persisted.version_kind == "editorial"
+        assert persisted.variant_label == variant_label
+
+    artifacts = client.get(f"/api/v1/artifacts/{project_id}")
+    assert artifacts.status_code == 200
+    rows = artifacts.json()["artifacts"]
+    assert len(rows) >= 1

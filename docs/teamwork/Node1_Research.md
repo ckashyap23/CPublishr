@@ -32,9 +32,7 @@ Primary:
 - `backend/src/services/orchestration/nodes/research_trends.py`
 
 Optional internal modules:
-- `backend/src/services/research/serp_client.py`
-- `backend/src/services/research/reranker.py`
-- `backend/src/services/research/pipeline.py`
+- none currently in this repo; add under `backend/src/services/research/` only if needed.
 
 Avoid changing orchestration wiring unless required:
 - `backend/src/services/orchestration/engine.py`

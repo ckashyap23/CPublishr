@@ -1,6 +1,8 @@
 # Byte-compiled
 __pycache__/
 *.py[cod]
+.pytest_cache/
+*.egg-info/
 
 # venv
 .venv/
@@ -9,3 +11,8 @@ backend/.venv/
 
 # env
 .env
+backend/.env
+
+# frontend
+ui/react/node_modules/
+ui/react/dist/

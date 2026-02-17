@@ -1,0 +1,11 @@
+# Backend runtime install (keeps `pyproject.toml` as the source of truth).
+#
+# From repo root:
+#   pip install -r backend/requirements.txt
+#
+# For dev/test tooling:
+#   pip install -e "backend[dev]"
+
+-e .
+
+

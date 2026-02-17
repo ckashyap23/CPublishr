@@ -6,6 +6,16 @@ from src.contracts.prd import EditorialRequest, EditorialResponse, MasterContent
 from src.db.repositories.content_repository import ContentRepository
 from src.db.repositories.project_repository import ProjectRepository
 from src.schemas.workflow import (
+    ArtifactGenerateRequest,
+    EditorialDraftResponse,
+    EditorialDirectFinalizeRequest,
+    EditorialDirectFinalizeResponse,
+    EditorialFeedbackPreviewRequest,
+    EditorialFeedbackPreviewResponse,
+    EditorialFinalizeSelectedRequest,
+    EditorialFinalizeSelectedResponse,
+    EditorialRegenerateOutlineRequest,
+    EditorialSaveInlineRequest,
     EditorialSessionFinalizeResponse,
     EditorialSessionIterateRequest,
     EditorialSessionIterateResponse,
@@ -57,22 +67,9 @@ def _load_topic_request(project_id: str, db: Session) -> TopicInitializationRequ
 def run_workflow(payload: WorkflowRunRequest, db: Session = Depends(get_db)) -> WorkflowRunResponse:
     req = _load_topic_request(payload.project_id, db)
     engine = OrchestrationEngine(db)
-    run_id, status = engine.run_default_flow(req)
-
-    if payload.run_editorial:
-        repo = ContentRepository(db)
-        target = repo.get_latest_version_by_kind(payload.project_id, "base") or repo.get_latest_version(payload.project_id)
-        if target is not None:
-            engine.run_editorial(
-                EditorialRequest(
-                    project_id=payload.project_id,
-                    current_version=target.version_number,
-                    editor_actions=[{"action": "rewrite", "target_section": "document"}],
-                    user_feedback=payload.editorial_comment or "Polish and improve clarity for publishing.",
-                )
-            )
-            status = "completed_with_editorial"
-    return WorkflowRunResponse(run_id=run_id, status=status)
+    run_id, _ = engine.run_default_flow(req)
+    # Editorial is mandatory now, so workflow run always pauses after Node 2.
+    return WorkflowRunResponse(run_id=run_id, status="awaiting_editorial")
 
 
 @router.get("/nodes/research/{project_id}", response_model=ResearchTrendResponse)
@@ -119,13 +116,17 @@ def run_master_node(project_id: str, db: Session = Depends(get_db)) -> MasterCon
     out = MasterContentResponse.model_validate(engine.node2.run(ctx).output_payload)
 
     repo = ContentRepository(db)
-    repo.create_version(
+    base = repo.create_version(
         version_id=new_id("ver"),
         project_id=project_id,
         content=out.master_document,
         version_number=repo.next_version_number(project_id),
         version_kind="base",
         variant_label=None,
+        keywords=out.core_arguments,
+        structure_outline=out.structure_outline,
+        version_stage="draft",
+        source_version_number=None,
     )
     for mv in out.master_variants or []:
         variant_doc = (mv.master_document or "").strip()
@@ -138,6 +139,10 @@ def run_master_node(project_id: str, db: Session = Depends(get_db)) -> MasterCon
             version_number=repo.next_version_number(project_id),
             version_kind="variant",
             variant_label=(mv.label or "").strip() or None,
+            keywords=mv.core_arguments,
+            structure_outline=mv.structure_outline,
+            version_stage="draft",
+            source_version_number=base.version_number,
         )
     return out
 
@@ -166,13 +171,17 @@ def run_master_node_post(payload: MasterNodeRunRequest, db: Session = Depends(ge
     out = MasterContentResponse.model_validate(engine.node2.run(ctx).output_payload)
     if payload.persist_versions:
         repo = ContentRepository(db)
-        repo.create_version(
+        base = repo.create_version(
             version_id=new_id("ver"),
             project_id=req.project_id,
             content=out.master_document,
             version_number=repo.next_version_number(req.project_id),
             version_kind="base",
             variant_label=None,
+            keywords=out.core_arguments,
+            structure_outline=out.structure_outline,
+            version_stage="draft",
+            source_version_number=None,
         )
         for mv in out.master_variants or []:
             variant_doc = (mv.master_document or "").strip()
@@ -185,6 +194,10 @@ def run_master_node_post(payload: MasterNodeRunRequest, db: Session = Depends(ge
                 version_number=repo.next_version_number(req.project_id),
                 version_kind="variant",
                 variant_label=(mv.label or "").strip() or None,
+                keywords=mv.core_arguments,
+                structure_outline=mv.structure_outline,
+                version_stage="draft",
+                source_version_number=base.version_number,
             )
     return out
 
@@ -250,3 +263,95 @@ def finalize_editorial_session(session_id: str, db: Session = Depends(get_db)) -
         final_version=res.draft_version,
         final_content=res.updated_master_document,
     )
+
+
+@router.post("/nodes/editorial/finalize-direct", response_model=EditorialDirectFinalizeResponse)
+def finalize_editorial_direct(
+    payload: EditorialDirectFinalizeRequest,
+    db: Session = Depends(get_db),
+) -> EditorialDirectFinalizeResponse:
+    engine = OrchestrationEngine(db)
+    try:
+        res = engine.finalize_version_direct(project_id=payload.project_id, current_version=payload.current_version)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return EditorialDirectFinalizeResponse(
+        final_version=res.draft_version,
+        final_content=res.updated_master_document,
+        status="editorial_finalized",
+    )
+
+
+@router.post("/nodes/artifacts/generate", response_model=WorkflowRunResponse)
+def generate_artifacts_for_latest_editorial(payload: ArtifactGenerateRequest, db: Session = Depends(get_db)) -> WorkflowRunResponse:
+    engine = OrchestrationEngine(db)
+    try:
+        engine.generate_artifacts_from_latest_editorial(payload.project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return WorkflowRunResponse(run_id=new_id("run"), status="artifacts_generated")
+
+
+@router.post("/nodes/editorial/regenerate-outline", response_model=EditorialDraftResponse)
+def editorial_regenerate_outline(
+    payload: EditorialRegenerateOutlineRequest,
+    db: Session = Depends(get_db),
+) -> EditorialDraftResponse:
+    engine = OrchestrationEngine(db)
+    try:
+        out = engine.regenerate_outline_draft(
+            project_id=payload.project_id,
+            source_version=payload.source_version,
+            structure_outline=payload.structure_outline,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return EditorialDraftResponse.model_validate(out)
+
+
+@router.post("/nodes/editorial/save-inline", response_model=EditorialDraftResponse)
+def editorial_save_inline(
+    payload: EditorialSaveInlineRequest,
+    db: Session = Depends(get_db),
+) -> EditorialDraftResponse:
+    engine = OrchestrationEngine(db)
+    try:
+        out = engine.save_inline_draft(
+            project_id=payload.project_id,
+            source_version=payload.source_version,
+            content=payload.content,
+            version_label=payload.version_label,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return EditorialDraftResponse.model_validate(out)
+
+
+@router.post("/nodes/editorial/feedback/preview", response_model=EditorialFeedbackPreviewResponse)
+def editorial_feedback_preview(
+    payload: EditorialFeedbackPreviewRequest,
+    db: Session = Depends(get_db),
+) -> EditorialFeedbackPreviewResponse:
+    engine = OrchestrationEngine(db)
+    try:
+        out = engine.feedback_preview(
+            project_id=payload.project_id,
+            source_version=payload.source_version,
+            user_feedback=payload.user_feedback,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return EditorialFeedbackPreviewResponse.model_validate(out)
+
+
+@router.post("/nodes/editorial/finalize-selected", response_model=EditorialFinalizeSelectedResponse)
+def editorial_finalize_selected(
+    payload: EditorialFinalizeSelectedRequest,
+    db: Session = Depends(get_db),
+) -> EditorialFinalizeSelectedResponse:
+    engine = OrchestrationEngine(db)
+    try:
+        out = engine.finalize_selected_version(project_id=payload.project_id, selected_version=payload.selected_version)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return EditorialFinalizeSelectedResponse.model_validate(out)
