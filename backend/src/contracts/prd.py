@@ -132,7 +132,39 @@ class DistributionResponse(ContractModel):
 
 ProjectStatus = Literal["draft", "ready", "published"]
 ContentVersionKind = Literal["base", "variant", "editorial"]
-ArtifactType = Literal["reel", "short_video", "voice_over_clip", "text_blog"]
+ArtifactKind = Literal["text", "image", "video", "audio", "gif", "bundle"]
+ArtifactFormat = Literal[
+    "caption",
+    "x_post",
+    "x_thread",
+    "blog_short",
+    "blog_long",
+    "newsletter",
+    "script_short",
+    "script_long",
+    "hook_bank",
+    "headline_variants",
+    "cta_variants",
+    "faq",
+    "playbook",
+    "image_prompt_pack",
+    "thumbnail_prompt",
+    "cover_prompt",
+    "carousel_prompt_pack",
+    "image",
+    "thumbnail",
+    "cover",
+    "storyboard",
+    "shotlist",
+    "edit_decision_list",
+    "subtitle_srt",
+    "video",
+    "voiceover_script",
+    "voiceover_audio",
+    "gif_storyboard",
+    "gif_loop",
+    "bundle",
+]
 
 
 class ProjectEntity(ContractModel):
@@ -177,10 +209,16 @@ class PlatformOutputListResponse(ContractModel):
 class ArtifactEntity(ContractModel):
     artifact_id: str
     project_id: str
-    artifact_type: ArtifactType
-    title: str
-    content: str
-    metadata: dict
+    format: ArtifactFormat
+    kind: ArtifactKind
+    title: str | None = None
+    payload_json: dict = Field(default_factory=dict)
+    tags_json: list[str] = Field(default_factory=list)
+    status: str = "generated"
+    revision: int = 1
+    parent_artifact_id: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class ArtifactListResponse(ContractModel):

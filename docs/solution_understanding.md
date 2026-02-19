@@ -48,8 +48,10 @@ Editorial:
 
 Artifacts:
 - `POST /api/v1/workflows/nodes/artifacts/generate`
+- `POST /api/v1/artifacts/generate`
 - `GET /api/v1/artifacts/{project_id}`
-- `GET /api/v1/artifacts/{project_id}/{artifact_type}`
+- `GET /api/v1/artifacts/{project_id}/{format}`
+- `GET /api/v1/artifacts/{project_id}/kind/{kind}`
 
 Versions:
 - `GET /api/v1/versions/{project_id}`
@@ -147,13 +149,16 @@ Primary UI files:
 - `ui/react/README.md`
 
 The UI supports:
-- workflow run (Node 0-2)
-- generate loader overlay for long-running workflow calls
+- node-by-node run with audit panel (Node 0 -> Node 1 -> Node 2)
+- non-blocking inline progress bar for long-running calls
 - version selection and in-place keyword patching
 - direct finalize selected version
 - inline edit/save/finalize flow
 - iterate preview/save/finalize flow
 - save-time version naming (prompt on save click)
+- artifact generation by kind/format multi-select
+- generated artifact view as per-artifact tabs
+- stored artifact retrieval view
 
 ## 8. Important Operational Notes
 

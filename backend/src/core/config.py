@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     azure_openai_deployment: str = "gpt-4o-mini"
     azure_openai_subscription_key: str = ""
     azure_openai_api_version: str = "2024-12-01-preview"
+    artifact_text_llm_enabled: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

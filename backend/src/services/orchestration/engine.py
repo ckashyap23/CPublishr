@@ -17,9 +17,10 @@ from src.db.repositories.content_repository import ContentRepository
 from src.db.repositories.editorial_session_repository import EditorialSessionRepository
 from src.db.repositories.project_repository import ProjectRepository
 from src.services.llm.azure_openai import AzureOpenAIClient
+from src.services.orchestration.artifacts.contracts import GenerationOptions
+from src.services.orchestration.artifacts.orchestrator import ArtifactPipelineOrchestrator
 from src.services.orchestration.contracts import NodeExecutionContext, NodeExecutionResult
 from src.services.orchestration.nodes.editorial import EditorialNode
-from src.services.orchestration.nodes.generate_artifacts import GenerateArtifactsNode
 from src.services.orchestration.nodes.master_content import MasterContentNode
 from src.services.orchestration.nodes.research_trends import ResearchTrendsNode
 from src.services.orchestration.nodes.topic_initialization import TopicInitializationNode
@@ -27,6 +28,15 @@ from src.services.platforms.registry import default_platform_registry
 from src.utils.ids import new_id
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_POST_EDITORIAL_ARTIFACT_FORMATS = [
+    # Keep this aligned with prior behavior (caption/storyboard/voiceover/blog),
+    # but now generated via the unified artifact pipeline.
+    "caption",
+    "storyboard",
+    "voiceover_audio",
+    "blog_long",
+]
 
 
 class OrchestrationEngine:
@@ -43,7 +53,6 @@ class OrchestrationEngine:
         self.node1 = ResearchTrendsNode(self.llm)
         self.node2 = MasterContentNode(self.llm)
         self.node3 = EditorialNode(self.llm)
-        self.node4 = GenerateArtifactsNode()
 
     @staticmethod
     def _inherit_variant_label_from_source(source) -> str | None:
@@ -109,26 +118,22 @@ class OrchestrationEngine:
 
     def _run_post_editorial_pipeline(self, project_id: str, master_doc: str) -> None:
         bundle = self.projects.get_context_bundle(project_id) or {}
-        ctx = NodeExecutionContext(
+        # Generate and persist artifacts via the unified artifact pipeline.
+        # This ensures `plan_text.py` and the other stages are used consistently
+        # whether artifacts are generated via explicit endpoint or post-editorial flow.
+        ArtifactPipelineOrchestrator(self.db).generate(
             project_id=project_id,
-            run_id=new_id("run"),
-            input_payload={"project_id": project_id},
-            state={"context_bundle": bundle, "final_master_document": master_doc},
+            requested_formats=list(DEFAULT_POST_EDITORIAL_ARTIFACT_FORMATS),
+            options=GenerationOptions(
+                run_plan=True,
+                run_prompt_pack=True,
+                run_render_media=True,
+                run_assemble=True,
+                run_package=True,
+                revision_mode="reset",
+            ),
+            style_settings={},
         )
-        artifacts_payload = self.node4.run(ctx).output_payload
-        self.artifacts.delete_artifacts_for_project(project_id)
-        for item in artifacts_payload.get("artifacts") or []:
-            try:
-                self.artifacts.create_artifact(
-                    artifact_id=new_id("art"),
-                    project_id=project_id,
-                    artifact_type=str(item.get("artifact_type") or "text_blog"),
-                    title=str(item.get("title") or "Untitled Artifact"),
-                    content=str(item.get("content") or ""),
-                    metadata=item.get("metadata") or {},
-                )
-            except Exception:
-                logger.exception("Failed to persist artifact for project_id=%s", project_id)
 
         # Regenerate platform outputs from finalized editorial content.
         self.content.delete_platform_outputs_for_project(project_id)
@@ -145,6 +150,14 @@ class OrchestrationEngine:
                 content=json.dumps(out, ensure_ascii=False),
                 optimized=True,
             )
+
+    def _safe_run_post_editorial_pipeline(self, project_id: str, master_doc: str) -> bool:
+        try:
+            self._run_post_editorial_pipeline(project_id, master_doc)
+            return True
+        except Exception:
+            logger.exception("Post-editorial pipeline failed for project_id=%s", project_id)
+            return False
 
     def generate_artifacts_from_latest_editorial(self, project_id: str) -> None:
         project = self.projects.get(project_id)
@@ -192,7 +205,7 @@ class OrchestrationEngine:
             source_version_number=current.version_number,
         )
         self.projects.set_final_version(payload.project_id, next_version)
-        self._run_post_editorial_pipeline(payload.project_id, validated.updated_master_document)
+        self._safe_run_post_editorial_pipeline(payload.project_id, validated.updated_master_document)
         return EditorialResponse(
             draft_version=next_version,
             updated_master_document=validated.updated_master_document,
@@ -221,7 +234,7 @@ class OrchestrationEngine:
             source_version_number=current.version_number,
         )
         self.projects.set_final_version(project_id, next_version)
-        self._run_post_editorial_pipeline(project_id, current.content)
+        self._safe_run_post_editorial_pipeline(project_id, current.content)
         return EditorialResponse(
             draft_version=next_version,
             updated_master_document=current.content,
@@ -310,7 +323,7 @@ class OrchestrationEngine:
         )
         self.projects.set_final_version(session.project_id, next_version)
         self.editorial_sessions.finalize(session_id)
-        self._run_post_editorial_pipeline(session.project_id, session.working_content)
+        self._safe_run_post_editorial_pipeline(session.project_id, session.working_content)
 
         return EditorialResponse(
             draft_version=next_version,
@@ -436,5 +449,9 @@ class OrchestrationEngine:
         if updated is None:
             raise ValueError("Failed to mark selected content version as final")
         self.projects.set_final_version(project_id, selected_version)
-        self._run_post_editorial_pipeline(project_id, updated.content)
-        return {"project_id": project_id, "final_version": selected_version, "status": "editorial_finalized"}
+        pipeline_ok = self._safe_run_post_editorial_pipeline(project_id, updated.content)
+        return {
+            "project_id": project_id,
+            "final_version": selected_version,
+            "status": ("editorial_finalized" if pipeline_ok else "editorial_finalized_pipeline_failed"),
+        }

@@ -14,7 +14,11 @@ MVP for multi-node content orchestration with mandatory editorial finalization b
 ## Current Flow
 
 1. Initialize topic context: `POST /api/v1/projects/`
-2. Run Node 0-2 workflow: `POST /api/v1/workflows/runs` -> returns `awaiting_editorial`
+2. Run Node 0-2:
+   - compact path: `POST /api/v1/workflows/runs` -> returns `awaiting_editorial`
+   - node-by-node path (used by current React audit UI):
+     - `POST /api/v1/workflows/nodes/research`
+     - `POST /api/v1/workflows/nodes/master`
 3. Editorial workspace:
    - select any version
    - edit inline and save as a named draft
@@ -22,6 +26,10 @@ MVP for multi-node content orchestration with mandatory editorial finalization b
    - finalize selected version directly (without editing) or finalize after save
    - patch keywords on existing version in-place
 4. Finalization triggers downstream artifact + adapter output generation.
+5. Artifact generator page:
+   - choose formats by kind
+   - generate selected artifacts
+   - view stored artifacts
 
 ## Node 0 Input Contract
 
@@ -40,4 +48,5 @@ Optional:
 ## References
 
 - `docs/solution_understanding.md`
+- `docs/teamwork/Artifact_Generation_Handoff.md`
 - `ui/react/README.md`
