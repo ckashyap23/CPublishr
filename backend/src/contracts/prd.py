@@ -7,10 +7,30 @@ class ContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-TargetAudience = Literal["builders", "founders", "enterprise", "general tech"]
-ContentDepth = Literal["surface", "intermediate", "deep"]
+AudiencePrimarySegment = Literal[
+    "general",
+    "professionals",
+    "creators_influencers",
+    "small_business_owners",
+    "founders_entrepreneurs",
+    "builders_developers",
+    "marketing_growth",
+    "sales_partnerships",
+    "enterprise_leaders",
+    "other",
+]
+DetailLevel = Literal["quick_take", "practical", "deep_dive"]
 TonePreference = Literal["professional", "analytical", "conversational"]
 DistributionTarget = Literal["linkedin", "x", "youtube", "instagram", "substack", "medium", "github"]
+AudienceFamiliarity = Literal["new", "somewhat_familiar", "very_familiar"]
+Stance = Literal["neutral", "supportive", "contrarian", "balanced"]
+PrimaryGoal = Literal["educate", "thought_leadership", "promote", "entertain", "recruit", "community", "convert"]
+DesiredAction = Literal["comment", "share", "follow", "click", "dm", "subscribe", "buy"]
+
+
+class TargetAudience(ContractModel):
+    primary_segment: AudiencePrimarySegment
+    notes: str | None = None
 
 
 class TopicInitializationRequest(ContractModel):
@@ -18,10 +38,16 @@ class TopicInitializationRequest(ContractModel):
     topic_title: str
     core_idea: str
     user_content: str | None = None
-    target_audience: TargetAudience | None = None
-    content_depth: ContentDepth | None = None
+    target_audience: TargetAudience
+    audience_familiarity: AudienceFamiliarity | None = None
+    detail_level: DetailLevel | None = None
     tone_preference: TonePreference
-    distribution_targets: list[DistributionTarget]
+    stance: Stance = "balanced"
+    primary_goal: PrimaryGoal | None = None
+    desired_action: DesiredAction | None = None
+    voice_profile_id: str
+    constraints: dict | None = None
+    distribution_targets: list[DistributionTarget] | None = None
 
 
 class TopicInitializationResponse(ContractModel):
@@ -133,38 +159,7 @@ class DistributionResponse(ContractModel):
 ProjectStatus = Literal["draft", "ready", "published"]
 ContentVersionKind = Literal["base", "variant", "editorial"]
 ArtifactKind = Literal["text", "image", "video", "audio", "gif", "bundle"]
-ArtifactFormat = Literal[
-    "caption",
-    "x_post",
-    "x_thread",
-    "blog_short",
-    "blog_long",
-    "newsletter",
-    "script_short",
-    "script_long",
-    "hook_bank",
-    "headline_variants",
-    "cta_variants",
-    "faq",
-    "playbook",
-    "image_prompt_pack",
-    "thumbnail_prompt",
-    "cover_prompt",
-    "carousel_prompt_pack",
-    "image",
-    "thumbnail",
-    "cover",
-    "storyboard",
-    "shotlist",
-    "edit_decision_list",
-    "subtitle_srt",
-    "video",
-    "voiceover_script",
-    "voiceover_audio",
-    "gif_storyboard",
-    "gif_loop",
-    "bundle",
-]
+ArtifactFormat = str
 
 
 class ProjectEntity(ContractModel):

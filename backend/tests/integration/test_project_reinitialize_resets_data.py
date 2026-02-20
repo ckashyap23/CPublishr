@@ -28,9 +28,10 @@ def test_project_initialize_resets_project_scoped_tables() -> None:
         "topic_title": "Reset behavior",
         "core_idea": "Node 0 starts fresh",
         "user_content": None,
-        "target_audience": "builders",
-        "content_depth": "surface",
+        "target_audience": {"primary_segment": "builders_developers", "notes": None},
+        "detail_level": "quick_take",
         "tone_preference": "professional",
+        "voice_profile_id": "vp_test",
         "distribution_targets": ["linkedin"],
     }
 

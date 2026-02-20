@@ -25,7 +25,7 @@ MVP for multi-node content orchestration with mandatory editorial finalization b
    - iterate via feedback preview, then save as named draft
    - finalize selected version directly (without editing) or finalize after save
    - patch keywords on existing version in-place
-4. Finalization triggers downstream artifact + adapter output generation.
+4. Finalize selected content version.
 5. Artifact generator page:
    - choose formats by kind
    - generate selected artifacts
@@ -38,15 +38,22 @@ Required:
 - `topic_title`
 - `core_idea`
 - `tone_preference`
-- `distribution_targets`
+- `voice_profile_id`
+- `target_audience.primary_segment`
 
 Optional:
 - `user_content`
-- `target_audience`
-- `content_depth`
+- `target_audience.notes`
+- `audience_familiarity` (`new | somewhat_familiar | very_familiar`)
+- `detail_level` (`quick_take | practical | deep_dive`)
+- `stance` (`neutral | supportive | contrarian | balanced`, default `balanced`)
+- `primary_goal` (`educate | thought_leadership | promote | entertain | recruit | community | convert`)
+- `desired_action` (`comment | share | follow | click | dm | subscribe | buy`)
+- `constraints` (JSON object)
+- `distribution_targets`
 
 ## References
 
 - `docs/solution_understanding.md`
-- `docs/teamwork/Artifact_Generation_Handoff.md`
+- `docs/teamwork/Generate_Artifacts.md`
 - `ui/react/README.md`

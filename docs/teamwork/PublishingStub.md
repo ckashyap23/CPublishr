@@ -63,7 +63,7 @@ Endpoint:
 
 Because `publish_jobs` schema changed, existing tables may need migration.
 
-Startup now runs a lightweight Postgres compatibility patch (`ALTER TABLE ... IF NOT EXISTS`) for recent added columns.
+Startup now uses SQLAlchemy `create_all()` from current models only. Legacy DB compatibility patching is intentionally removed.
 For larger schema changes, still use explicit migrations.
 
 ## Remaining Work to Reach Real Publishing

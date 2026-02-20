@@ -42,14 +42,9 @@ Avoid changing orchestration wiring unless required:
 Node 1 reads from `context.state["context_bundle"]`.
 
 Expected available fields:
-- `topic_title`
-- `normalized_topic`
-- `core_idea`
-- `user_content`
-- `target_audience`
-- `content_depth`
-- `tone_preference`
-- `distribution_targets`
+- Required: `topic_title`, `normalized_topic`, `core_idea`, `tone_preference`, `voice_profile_id`
+- Required for audience targeting: `target_audience.primary_segment`
+- Optional: `user_content`, `target_audience.notes`, `audience_familiarity`, `detail_level`, `stance`, `primary_goal`, `desired_action`, `constraints`, `distribution_targets`
 
 Use defensive defaults for missing values.
 
@@ -64,9 +59,22 @@ Use defensive defaults for missing values.
     "normalized_topic": "multi-agent ai content orchestration",
     "core_idea": "Generate one canonical master document, then adapt packaging per platform.",
     "user_content": "Imagine your content as a movie script: you write one master doc, and a crew of AI \"agents\" turns it into trailers, posters, and behind-the-scenes clips automatically. One agent makes a punchy LinkedIn post, another crafts an Instagram carousel, a third writes a Twitter/X thread, and a fourth adapts it into a YouTube short script. Same core story, different costumes, different stage. The fun part? You stop rewriting from scratch and start directing the message while your agents handle the platform-specific polish.",
-    "target_audience": "builders",
-    "content_depth": "intermediate",
+    "target_audience": {
+      "primary_segment": "builders_developers",
+      "notes": null
+    },
+    "audience_familiarity": "somewhat_familiar",
+    "detail_level": "practical",
     "tone_preference": "professional",
+    "stance": "balanced",
+    "primary_goal": "educate",
+    "desired_action": "comment",
+    "voice_profile_id": "vp_local_1",
+    "constraints": {
+      "must_include": ["practical examples"],
+      "must_avoid": ["hype language"],
+      "forbidden_claims": []
+    },
     "distribution_targets": ["linkedin", "x", "medium", "github"]
   }
 }

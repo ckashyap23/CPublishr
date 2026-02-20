@@ -40,11 +40,6 @@ def generate_artifacts(payload: ArtifactGenerationRequest, db: Session = Depends
             project_id=payload.project_id,
             requested_formats=[str(x) for x in requested_formats],
             options=GenerationOptions(
-                run_plan=payload.stages.plan,
-                run_prompt_pack=payload.stages.prompt_pack,
-                run_render_media=payload.stages.render_media,
-                run_assemble=payload.stages.assemble,
-                run_package=payload.stages.package,
                 revision_mode=payload.revision_mode,
             ),
             style_settings=payload.style_settings,
@@ -55,6 +50,13 @@ def generate_artifacts(payload: ArtifactGenerationRequest, db: Session = Depends
         logger.exception("Artifact generation failed for project_id=%s", payload.project_id)
         raise HTTPException(status_code=500, detail=f"Artifact generation failed: {exc}") from exc
     return ArtifactGenerationResponse.model_validate(out)
+
+
+@router.get("/catalog/formats")
+def artifact_formats_catalog() -> dict:
+    from src.services.orchestration.artifact_schema import formats_by_kind_map
+
+    return {"formats_by_kind": formats_by_kind_map()}
 
 
 @router.get("/{project_id}", response_model=ArtifactListResponse)

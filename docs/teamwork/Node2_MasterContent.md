@@ -42,10 +42,13 @@ Node 2 output (`MasterContentResponse`) fields:
 ### Node 0 context bundle
 
 Required Node 0 inputs (reference):
-- `topic_title`, `core_idea`, `tone_preference`, `distribution_targets`
+- `topic_title`, `normalized_topic`, `core_idea`, `tone_preference`, `voice_profile_id`
 
 Optional Node 0 inputs:
-- `user_content`, `target_audience`, `content_depth`
+- `user_content`, `target_audience.notes`, `audience_familiarity`, `detail_level`, `stance`, `primary_goal`, `desired_action`, `constraints`, `distribution_targets`
+
+Required Node 0 audience input:
+- `target_audience.primary_segment`
 
 ### Node 1 research payload
 

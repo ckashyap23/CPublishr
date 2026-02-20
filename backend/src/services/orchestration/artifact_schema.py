@@ -2,54 +2,28 @@ from __future__ import annotations
 
 from typing import Any
 
-KIND_BY_FORMAT: dict[str, str] = {
-    # text
-    "caption": "text",
-    "x_post": "text",
-    "x_thread": "text",
-    "blog_short": "text",
-    "blog_long": "text",
-    "newsletter": "text",
-    "script_short": "text",
-    "script_long": "text",
-    "hook_bank": "text",
-    "headline_variants": "text",
-    "cta_variants": "text",
-    "faq": "text",
-    "playbook": "text",
-    # image
-    "image_prompt_pack": "image",
-    "thumbnail_prompt": "image",
-    "cover_prompt": "image",
-    "carousel_prompt_pack": "image",
-    "image": "image",
-    "thumbnail": "image",
-    "cover": "image",
-    # video
-    "storyboard": "video",
-    "shotlist": "video",
-    "edit_decision_list": "video",
-    "subtitle_srt": "video",
-    "video": "video",
-    # audio
-    "voiceover_script": "audio",
-    "voiceover_audio": "audio",
-    # gif
-    "gif_storyboard": "gif",
-    "gif_loop": "gif",
-    # bundle
-    "bundle": "bundle",
-}
+def kind_by_format_map() -> dict[str, str]:
+    from src.services.orchestration.artifacts.formats.registry import get_kind_by_format
 
-ALLOWED_FORMATS = set(KIND_BY_FORMAT.keys())
-ALLOWED_KINDS = {"text", "image", "video", "audio", "gif", "bundle"}
+    return get_kind_by_format()
+
+
+def formats_by_kind_map() -> dict[str, list[str]]:
+    from src.services.orchestration.artifacts.formats.registry import get_formats_by_kind
+
+    return get_formats_by_kind()
+
+
+def allowed_formats() -> set[str]:
+    return set(kind_by_format_map().keys())
 
 
 def derive_kind(fmt: str) -> str:
     normalized = (fmt or "").strip()
-    if normalized not in KIND_BY_FORMAT:
+    kinds = kind_by_format_map()
+    if normalized not in kinds:
         raise ValueError(f"Unsupported format: {normalized}")
-    return KIND_BY_FORMAT[normalized]
+    return kinds[normalized]
 
 
 def default_payload_template() -> dict[str, Any]:

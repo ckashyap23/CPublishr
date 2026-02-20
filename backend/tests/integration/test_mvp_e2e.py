@@ -24,9 +24,10 @@ def test_mvp_end_to_end_minimal_flow() -> None:
         "topic_title": "AI workflow MVP",
         "core_idea": "One master doc and predictable adapters.",
         "user_content": "Use this as optional seed context from the user.",
-        "target_audience": "builders",
-        "content_depth": "surface",
+        "target_audience": {"primary_segment": "builders_developers", "notes": None},
+        "detail_level": "quick_take",
         "tone_preference": "professional",
+        "voice_profile_id": "vp_test",
         "distribution_targets": ["linkedin", "x", "medium", "github"],
     }
 

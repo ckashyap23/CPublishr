@@ -18,16 +18,17 @@ class ArtifactDraft:
 @dataclass
 class PipelineContext:
     project_id: str
+    context_bundle: dict[str, Any]
     topic_title: str
     core_idea: str
     master_body: str
     seed_keywords: list[str]
-    target_audience: str | None = None
-    content_depth: str | None = None
+    target_audience: dict[str, Any] | None = None
+    audience_familiarity: str | None = None
+    detail_level: str | None = None
     tone_preference: str | None = None
     requested_formats: list[str] = field(default_factory=list)
     style_settings: dict[str, Any] = field(default_factory=dict)
-    stage_outputs: dict[str, list[ArtifactDraft]] = field(default_factory=dict)
 
 
 @dataclass
@@ -38,9 +39,4 @@ class StageResult:
 
 @dataclass
 class GenerationOptions:
-    run_plan: bool = True
-    run_prompt_pack: bool = True
-    run_render_media: bool = True
-    run_assemble: bool = True
-    run_package: bool = True
     revision_mode: str = "new_revision"  # new_revision | reset

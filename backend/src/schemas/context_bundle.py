@@ -2,10 +2,19 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-from src.contracts.prd import ContentDepth, DistributionTarget, TargetAudience, TonePreference
+from src.contracts.prd import (
+    DetailLevel,
+    DesiredAction,
+    DistributionTarget,
+    AudienceFamiliarity,
+    PrimaryGoal,
+    Stance,
+    TargetAudience,
+    TonePreference,
+)
 
 
-class ContextBundleV1(BaseModel):
+class ContextBundle(BaseModel):
     """
     Canonical shape of the project context bundle produced by Node 0.
 
@@ -19,9 +28,19 @@ class ContextBundleV1(BaseModel):
     normalized_topic: str
     core_idea: str
     user_content: str | None = None
-    target_audience: TargetAudience | None = None
-    content_depth: ContentDepth | None = None
+    target_audience: TargetAudience
+    audience_familiarity: AudienceFamiliarity | None = None
+    detail_level: DetailLevel | None = None
     tone_preference: TonePreference
-    distribution_targets: list[DistributionTarget]
+    stance: Stance = "balanced"
+    primary_goal: PrimaryGoal | None = None
+    desired_action: DesiredAction | None = None
+    voice_profile_id: str
+    constraints: dict | None = None
+    distribution_targets: list[DistributionTarget] | None = None
+
+
+# Backward-compatible alias used across existing code paths.
+ContextBundleV1 = ContextBundle
 
 

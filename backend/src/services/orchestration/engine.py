@@ -16,6 +16,7 @@ from src.db.repositories.artifact_repository import ArtifactRepository
 from src.db.repositories.content_repository import ContentRepository
 from src.db.repositories.editorial_session_repository import EditorialSessionRepository
 from src.db.repositories.project_repository import ProjectRepository
+from src.services.orchestration.artifact_schema import allowed_formats
 from src.services.llm.azure_openai import AzureOpenAIClient
 from src.services.orchestration.artifacts.contracts import GenerationOptions
 from src.services.orchestration.artifacts.orchestrator import ArtifactPipelineOrchestrator
@@ -28,15 +29,6 @@ from src.services.platforms.registry import default_platform_registry
 from src.utils.ids import new_id
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_POST_EDITORIAL_ARTIFACT_FORMATS = [
-    # Keep this aligned with prior behavior (caption/storyboard/voiceover/blog),
-    # but now generated via the unified artifact pipeline.
-    "caption",
-    "storyboard",
-    "voiceover_audio",
-    "blog_long",
-]
 
 
 class OrchestrationEngine:
@@ -59,6 +51,19 @@ class OrchestrationEngine:
         if source.version_kind in {"variant", "editorial"}:
             return source.variant_label
         return None
+
+    @staticmethod
+    def _default_post_editorial_artifact_formats() -> list[str]:
+        """
+        Resolve all registered formats from the builder registry.
+        No hardcoded default format list is used.
+        """
+        # Resolve dynamically so a bad format module does not break app import.
+        try:
+            return sorted(allowed_formats())
+        except Exception:
+            logger.exception("Failed to resolve registered artifact formats.")
+            return []
 
     def execute(self, context: NodeExecutionContext) -> NodeExecutionResult:
         return NodeExecutionResult(status="completed", output_payload=context.state)
@@ -118,22 +123,19 @@ class OrchestrationEngine:
 
     def _run_post_editorial_pipeline(self, project_id: str, master_doc: str) -> None:
         bundle = self.projects.get_context_bundle(project_id) or {}
-        # Generate and persist artifacts via the unified artifact pipeline.
-        # This ensures `plan_text.py` and the other stages are used consistently
-        # whether artifacts are generated via explicit endpoint or post-editorial flow.
-        ArtifactPipelineOrchestrator(self.db).generate(
-            project_id=project_id,
-            requested_formats=list(DEFAULT_POST_EDITORIAL_ARTIFACT_FORMATS),
-            options=GenerationOptions(
-                run_plan=True,
-                run_prompt_pack=True,
-                run_render_media=True,
-                run_assemble=True,
-                run_package=True,
-                revision_mode="reset",
-            ),
-            style_settings={},
-        )
+        # Generate and persist artifacts via per-format builders.
+        default_formats = self._default_post_editorial_artifact_formats()
+        if default_formats:
+            ArtifactPipelineOrchestrator(self.db).generate(
+                project_id=project_id,
+                requested_formats=list(default_formats),
+                options=GenerationOptions(
+                    revision_mode="reset",
+                ),
+                style_settings={},
+            )
+        else:
+            logger.warning("No registered artifact formats found; skipping post-editorial artifact generation.")
 
         # Regenerate platform outputs from finalized editorial content.
         self.content.delete_platform_outputs_for_project(project_id)
@@ -449,9 +451,8 @@ class OrchestrationEngine:
         if updated is None:
             raise ValueError("Failed to mark selected content version as final")
         self.projects.set_final_version(project_id, selected_version)
-        pipeline_ok = self._safe_run_post_editorial_pipeline(project_id, updated.content)
         return {
             "project_id": project_id,
             "final_version": selected_version,
-            "status": ("editorial_finalized" if pipeline_ok else "editorial_finalized_pipeline_failed"),
+            "status": "editorial_finalized",
         }

@@ -9,8 +9,8 @@ Core workflow:
 4. Node 3: Editorial (Human-in-the-loop)
 
 Node 0 input contract:
-- Required: `topic_title`, `core_idea`, `tone_preference`, `distribution_targets`
-- Optional: `user_content`, `target_audience`, `content_depth`
+- Required: `topic_title`, `core_idea`, `tone_preference`, `voice_profile_id`, `target_audience.primary_segment`
+- Optional: `user_content`, `target_audience.notes`, `audience_familiarity`, `detail_level`, `stance`, `primary_goal`, `desired_action`, `constraints`, `distribution_targets`
 
 Platform adapters:
 - LinkedIn, X, YouTube, Instagram, Substack, Medium, GitHub

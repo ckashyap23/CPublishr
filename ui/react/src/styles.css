@@ -16,6 +16,34 @@ h1, h2, h3 { margin-top: 0; }
 .grid { display: grid; gap: 12px; }
 .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 label { font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px; }
+.label-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.label-row label {
+  margin-bottom: 0;
+}
+.tooltip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid #c7d4ea;
+  background: #f2f6ff;
+  color: #264a99;
+  font-size: 12px;
+  line-height: 1;
+  cursor: help;
+  user-select: none;
+}
+.tooltip-icon:focus {
+  outline: 2px solid rgba(11, 95, 255, 0.35);
+  outline-offset: 2px;
+}
 input, select, textarea { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 14px; }
 
 /* Normalize form controls so they render consistently across Windows/browser themes. */

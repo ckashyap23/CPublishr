@@ -26,9 +26,10 @@ def test_happy_path_topic_to_outputs_and_editorial_and_publish_job() -> None:
         "topic_title": "AI agents for content",
         "core_idea": "One master doc, many platform-native variants.",
         "user_content": "Include practical startup examples where possible.",
-        "target_audience": "builders",
-        "content_depth": "intermediate",
+        "target_audience": {"primary_segment": "builders_developers", "notes": None},
+        "detail_level": "practical",
         "tone_preference": "professional",
+        "voice_profile_id": "vp_test",
         "distribution_targets": ["linkedin", "x", "medium", "github"],
     }
 

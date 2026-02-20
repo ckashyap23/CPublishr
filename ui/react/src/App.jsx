@@ -20,53 +20,48 @@ Imagine a world where cats reign supreme. With their unique qualities and indepe
 
 In the end, while both cats and dogs have their merits, it's hard to ignore the remarkable qualities that cats bring to the table. They might just be the perfect pet to rule the world, one purr at a time.`;
 
-const AUDIENCE_OPTIONS = ["", "builders", "founders", "enterprise", "general tech"];
-const DEPTH_OPTIONS = ["", "surface", "intermediate", "deep"];
+const AUDIENCE_OPTIONS = [
+  { value: "general", label: "General" },
+  { value: "professionals", label: "Professionals (white-collar)" },
+  { value: "creators_influencers", label: "Creators / Influencers" },
+  { value: "small_business_owners", label: "Small business owners" },
+  { value: "founders_entrepreneurs", label: "Founders / Entrepreneurs" },
+  { value: "builders_developers", label: "Builders / Developers" },
+  { value: "marketing_growth", label: "Marketing / Growth" },
+  { value: "sales_partnerships", label: "Sales / Partnerships" },
+  { value: "enterprise_leaders", label: "Enterprise leaders" },
+  { value: "other", label: "Other" },
+];
+const AUDIENCE_FAMILIARITY_OPTIONS = [
+  { value: "", label: "(none)" },
+  { value: "new", label: "New" },
+  { value: "somewhat_familiar", label: "Somewhat familiar" },
+  { value: "very_familiar", label: "Very familiar" },
+];
+const DETAIL_LEVEL_OPTIONS = [
+  { value: "", label: "(none)" },
+  { value: "quick_take", label: "Quick take" },
+  { value: "practical", label: "Practical" },
+  { value: "deep_dive", label: "Deep dive" },
+];
 const TONE_OPTIONS = ["professional", "analytical", "conversational"];
+const STANCE_OPTIONS = ["neutral", "supportive", "contrarian", "balanced"];
+const PRIMARY_GOAL_OPTIONS = ["", "educate", "thought_leadership", "promote", "entertain", "recruit", "community", "convert"];
+const DESIRED_ACTION_OPTIONS = ["", "comment", "share", "follow", "click", "dm", "subscribe", "buy"];
 const TARGETS = ["linkedin", "x", "youtube", "instagram", "substack", "medium", "github"];
-const ARTIFACT_FORMATS_BY_KIND = {
-  text: [
-    "caption",
-    "x_post",
-    "x_thread",
-    "blog_short",
-    "blog_long",
-    "newsletter",
-    "script_short",
-    "script_long",
-    "hook_bank",
-    "headline_variants",
-    "cta_variants",
-    "faq",
-    "playbook",
-  ],
-  image: [
-    "image_prompt_pack",
-    "thumbnail_prompt",
-    "cover_prompt",
-    "carousel_prompt_pack",
-    "image",
-    "thumbnail",
-    "cover",
-  ],
-  video: [
-    "storyboard",
-    "shotlist",
-    "edit_decision_list",
-    "subtitle_srt",
-    "video",
-  ],
-  audio: [
-    "voiceover_script",
-    "voiceover_audio",
-  ],
-  gif: [
-    "gif_storyboard",
-    "gif_loop",
-  ],
-  bundle: ["bundle"],
-};
 
+function LabelWithTooltip({ text, tooltip }) {
+  return (
+    <div className="label-row">
+      <label>{text}</label>
+      {tooltip ? (
+        <span className="tooltip-icon" title={tooltip} aria-label={tooltip} tabIndex={0} role="note">
+          ⓘ
+        </span>
+      ) : null}
+    </div>
+  );
+}
 async function apiRequest(baseUrl, method, path, body) {
   const res = await fetch(`${baseUrl}${path}`, {
     method,
@@ -112,11 +107,19 @@ export default function App() {
     topic_title: "Cats are better than dogs",
     core_idea: "Cats are better than dogs",
     user_content: DEFAULT_USER_CONTENT,
-    target_audience: "builders",
-    content_depth: "intermediate",
+    target_audience_segment: "builders_developers",
+    target_audience_notes: "",
+    audience_familiarity: "",
+    detail_level: "practical",
     tone_preference: "conversational",
-    distribution_targets: ["linkedin", "github"],
+    stance: "balanced",
+    primary_goal: "",
+    desired_action: "",
+    voice_profile_id: "vp_local_1",
+    constraints: null,
+    distribution_targets: ["x", "instagram"],
   });
+  const [constraintsText, setConstraintsText] = useState("");
 
   const [versions, setVersions] = useState([]);
   const [selectedVersionNumber, setSelectedVersionNumber] = useState(null);
@@ -127,6 +130,7 @@ export default function App() {
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [editorMode, setEditorMode] = useState("none"); // none | inline | iterate
   const [selectedArtifactFormats, setSelectedArtifactFormats] = useState([]);
+  const [artifactFormatsByKind, setArtifactFormatsByKind] = useState({});
   const [artifactOutput, setArtifactOutput] = useState(null);
   const [selectedArtifactTab, setSelectedArtifactTab] = useState(0);
   const [storedArtifacts, setStoredArtifacts] = useState([]);
@@ -151,17 +155,33 @@ export default function App() {
   }, [artifactOutput]);
   const selectedGeneratedArtifact = generatedArtifacts[selectedArtifactTab] || null;
   const storedFormats = useMemo(() => {
+    const byKind = artifactFormatsByKind && typeof artifactFormatsByKind === "object" ? artifactFormatsByKind : {};
+    const preferredKindOrder = ["text", "image", "gif", "video", "audio"];
     const seen = new Set();
     const out = [];
-    for (const a of storedArtifacts) {
-      const fmt = (a?.format || "").trim();
-      if (fmt && !seen.has(fmt)) {
-        seen.add(fmt);
-        out.push(fmt);
+
+    for (const kind of preferredKindOrder) {
+      const formats = Array.isArray(byKind[kind]) ? byKind[kind] : [];
+      for (const fmt of formats) {
+        const normalized = String(fmt || "").trim();
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        out.push(normalized);
       }
     }
-    return out.sort();
-  }, [storedArtifacts]);
+
+    for (const [kind, formats] of Object.entries(byKind)) {
+      if (preferredKindOrder.includes(kind)) continue;
+      for (const fmt of Array.isArray(formats) ? formats : []) {
+        const normalized = String(fmt || "").trim();
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        out.push(normalized);
+      }
+    }
+
+    return out;
+  }, [artifactFormatsByKind]);
   const filteredStoredArtifacts = useMemo(() => {
     if (!selectedStoredFormat) return [];
     return storedArtifacts.filter((a) => a?.format === selectedStoredFormat);
@@ -216,6 +236,45 @@ export default function App() {
     setForm({ ...form, distribution_targets: Array.from(current) });
   }
 
+  function buildTopicPayload() {
+    let constraints = null;
+    if ((constraintsText || "").trim()) {
+      try {
+        const parsed = JSON.parse(constraintsText);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          constraints = parsed;
+        } else {
+          throw new Error("Constraints must be a JSON object.");
+        }
+      } catch {
+        throw new Error("Constraints must be valid JSON object text.");
+      }
+    }
+    const voiceProfileId = (form.voice_profile_id || "").trim();
+    if (!voiceProfileId) {
+      throw new Error("Voice Profile ID is required.");
+    }
+    return {
+      project_id: (form.project_id || "").trim(),
+      topic_title: (form.topic_title || "").trim(),
+      core_idea: (form.core_idea || "").trim(),
+      user_content: (form.user_content || "").trim() || null,
+      target_audience: {
+        primary_segment: form.target_audience_segment,
+        notes: (form.target_audience_notes || "").trim() || null,
+      },
+      tone_preference: form.tone_preference,
+      stance: form.stance || "balanced",
+      audience_familiarity: form.audience_familiarity || null,
+      detail_level: form.detail_level || null,
+      primary_goal: form.primary_goal || null,
+      desired_action: form.desired_action || null,
+      voice_profile_id: voiceProfileId,
+      constraints,
+      distribution_targets: form.distribution_targets.length ? form.distribution_targets : null,
+    };
+  }
+
   function toggleArtifactFormat(format) {
     const current = new Set(selectedArtifactFormats);
     if (current.has(format)) current.delete(format);
@@ -224,7 +283,7 @@ export default function App() {
   }
 
   function toggleArtifactKind(kind) {
-    const formats = ARTIFACT_FORMATS_BY_KIND[kind] || [];
+    const formats = artifactFormatsByKind[kind] || [];
     const current = new Set(selectedArtifactFormats);
     const allSelected = formats.every((fmt) => current.has(fmt));
     if (allSelected) {
@@ -243,8 +302,9 @@ export default function App() {
     setNodeAudit([]);
     setCanContinueToEditorial(false);
     try {
+      const topicPayload = buildTopicPayload();
       setNodeAudit((prev) => [...prev, { node: "Node 0 - Topic Initialization", status: "running", output: null }]);
-      const node0 = await apiRequest(apiBaseUrl, "POST", "/api/v1/projects/", form);
+      const node0 = await apiRequest(apiBaseUrl, "POST", "/api/v1/projects/", topicPayload);
       setNodeAudit((prev) => {
         const next = [...prev];
         next[next.length - 1] = { node: "Node 0 - Topic Initialization", status: "completed", output: node0 };
@@ -253,7 +313,7 @@ export default function App() {
 
       setNodeAudit((prev) => [...prev, { node: "Node 1 - Research Trends", status: "running", output: null }]);
       const node1 = await apiRequest(apiBaseUrl, "POST", "/api/v1/workflows/nodes/research", {
-        topic: form,
+        topic: topicPayload,
         persist_context: false,
       });
       setNodeAudit((prev) => {
@@ -264,7 +324,7 @@ export default function App() {
 
       setNodeAudit((prev) => [...prev, { node: "Node 2 - Master Content", status: "running", output: null }]);
       const node2 = await apiRequest(apiBaseUrl, "POST", "/api/v1/workflows/nodes/master", {
-        topic: form,
+        topic: topicPayload,
         research: node1,
         persist_context: false,
         persist_versions: true,
@@ -417,6 +477,9 @@ export default function App() {
   async function onFinalizeSelected() {
     if (!selectedVersion) return;
     setError("");
+    const prevPage = page;
+    setMessage(`Finalizing version v${selectedVersion.version_number}...`);
+    setPage("artifacts");
     setBusy(true);
     try {
       await apiRequest(apiBaseUrl, "POST", "/api/v1/workflows/nodes/editorial/finalize-selected", {
@@ -424,9 +487,9 @@ export default function App() {
         selected_version: selectedVersion.version_number,
       });
       setMessage(`Finalized version v${selectedVersion.version_number}.`);
-      setPage("artifacts");
     } catch (e) {
       setError(e.message || String(e));
+      setPage(prevPage);
     } finally {
       setBusy(false);
     }
@@ -442,17 +505,21 @@ export default function App() {
     });
     if (!saved?.draft_version) return;
     setError("");
+    const prevPage = page;
+    setMessage(`Finalizing version v${saved.draft_version}...`);
+    setPage("artifacts");
     setBusy(true);
     try {
       await apiRequest(apiBaseUrl, "POST", "/api/v1/workflows/nodes/editorial/finalize-selected", {
         project_id: form.project_id,
         selected_version: saved.draft_version,
       });
-      await refreshVersions(form.project_id, saved.draft_version);
       setMessage(`Saved and finalized version v${saved.draft_version}.`);
-      setPage("artifacts");
+      // Refresh versions asynchronously (do not block navigation).
+      refreshVersions(form.project_id, saved.draft_version).catch(() => {});
     } catch (e) {
       setError(e.message || String(e));
+      setPage(prevPage);
     } finally {
       setBusy(false);
     }
@@ -476,17 +543,21 @@ export default function App() {
     });
     if (!saved?.draft_version) return;
     setError("");
+    const prevPage = page;
+    setMessage(`Finalizing version v${saved.draft_version}...`);
+    setPage("artifacts");
     setBusy(true);
     try {
       await apiRequest(apiBaseUrl, "POST", "/api/v1/workflows/nodes/editorial/finalize-selected", {
         project_id: form.project_id,
         selected_version: saved.draft_version,
       });
-      await refreshVersions(form.project_id, saved.draft_version);
       setMessage(`Saved and finalized version v${saved.draft_version}.`);
-      setPage("artifacts");
+      // Refresh versions asynchronously (do not block navigation).
+      refreshVersions(form.project_id, saved.draft_version).catch(() => {});
     } catch (e) {
       setError(e.message || String(e));
+      setPage(prevPage);
     } finally {
       setBusy(false);
     }
@@ -507,13 +578,6 @@ export default function App() {
       const out = await apiRequest(apiBaseUrl, "POST", "/api/v1/artifacts/generate", {
         project_id: form.project_id,
         requested_formats: selectedArtifactFormats,
-        stages: {
-          plan: true,
-          prompt_pack: true,
-          render_media: true,
-          assemble: true,
-          package: true,
-        },
         revision_mode: "new_revision",
         style_settings: {},
       });
@@ -561,6 +625,23 @@ export default function App() {
     const projectId = (form.project_id || "").trim();
     checkExistingContent(projectId);
   }, [form.project_id, apiBaseUrl]);
+
+  useEffect(() => {
+    let ignore = false;
+    async function loadArtifactFormats() {
+      try {
+        const out = await apiRequest(apiBaseUrl, "GET", "/api/v1/artifacts/catalog/formats");
+        const byKind = out?.formats_by_kind && typeof out.formats_by_kind === "object" ? out.formats_by_kind : {};
+        if (!ignore) setArtifactFormatsByKind(byKind);
+      } catch {
+        if (!ignore) setArtifactFormatsByKind({});
+      }
+    }
+    loadArtifactFormats();
+    return () => {
+      ignore = true;
+    };
+  }, [apiBaseUrl]);
 
   return (
     <div className="container">
@@ -615,36 +696,111 @@ export default function App() {
 
       {page === "setup" && showGenerateSetupForm && (
         <div className="card">
-          <h2>Initialize + Generate Content</h2>
+          <h2>Generate Content</h2>
           <div className="grid two">
             <div>
-              <label>Topic Title (required)</label>
+              <LabelWithTooltip
+                text="Topic Title (required)"
+                tooltip="A short headline for your post idea. Keep it simple and specific—this is used to name and organize your content."
+              />
               <input value={form.topic_title} onChange={(e) => setForm({ ...form, topic_title: e.target.value })} />
             </div>
             <div>
-              <label>Core Idea (required)</label>
+              <LabelWithTooltip
+                text="Core Idea (required)"
+                tooltip="The one-sentence point you want to make. If someone reads only this, they should understand your main message."
+              />
               <input value={form.core_idea} onChange={(e) => setForm({ ...form, core_idea: e.target.value })} />
             </div>
             <div>
-              <label>Target Audience</label>
-              <select value={form.target_audience} onChange={(e) => setForm({ ...form, target_audience: e.target.value || null })}>
-                {AUDIENCE_OPTIONS.map((x) => <option key={x || "none"} value={x}>{x || "(none)"}</option>)}
+              <LabelWithTooltip
+                text="Target Audience (required)"
+                tooltip="Who you’re writing for. Pick the closest match—this helps choose the right language, examples, and assumptions."
+              />
+              <select
+                value={form.target_audience_segment}
+                onChange={(e) => setForm({ ...form, target_audience_segment: e.target.value })}
+              >
+                {AUDIENCE_OPTIONS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
               </select>
             </div>
             <div>
-              <label>Content Depth</label>
-              <select value={form.content_depth} onChange={(e) => setForm({ ...form, content_depth: e.target.value || null })}>
-                {DEPTH_OPTIONS.map((x) => <option key={x || "none"} value={x}>{x || "(none)"}</option>)}
+              <LabelWithTooltip
+                text="Target Audience Notes (optional)"
+                tooltip="Optional. Add specifics about your audience (role, industry, constraints). The more specific this is, the more accurate the output will be."
+              />
+              <input
+                value={form.target_audience_notes}
+                onChange={(e) => setForm({ ...form, target_audience_notes: e.target.value })}
+                placeholder="Optional specifics for audience context"
+              />
+            </div>
+            <div>
+              <LabelWithTooltip
+                text="Audience Familiarity"
+                tooltip={"How familiar your audience is with this topic.\nNew: new to the topic\nSomewhat familiar: knows basics\nVery familiar: deep understanding"}
+              />
+              <select value={form.audience_familiarity} onChange={(e) => setForm({ ...form, audience_familiarity: e.target.value || "" })}>
+                {AUDIENCE_FAMILIARITY_OPTIONS.map((x) => <option key={x.value || "none"} value={x.value}>{x.label}</option>)}
               </select>
             </div>
             <div>
-              <label>Tone Preference (required)</label>
+              <LabelWithTooltip
+                text="Detail Level"
+                tooltip={"How detailed you want the content.\nQuick take: summary\nPractical: actionable depth\nDeep dive: thorough coverage with nuances"}
+              />
+              <select value={form.detail_level} onChange={(e) => setForm({ ...form, detail_level: e.target.value || null })}>
+                {DETAIL_LEVEL_OPTIONS.map((x) => <option key={x.value || "none"} value={x.value}>{x.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <LabelWithTooltip
+                text="Tone Preference (required)"
+                tooltip="The “voice” of the writing—how it should sound. Example: conversational, formal, witty, bold, etc."
+              />
               <select value={form.tone_preference} onChange={(e) => setForm({ ...form, tone_preference: e.target.value })}>
                 {TONE_OPTIONS.map((x) => <option key={x} value={x}>{x}</option>)}
               </select>
             </div>
             <div>
-              <label>Distribution Targets (required)</label>
+              <LabelWithTooltip
+                text="Stance"
+                tooltip={"The point of view you want to take.\nSupportive: agree/advocate\nNeutral: informative, balanced\nContrarian: challenge the common view\nBalanced: show both sides and conclude"}
+              />
+              <select value={form.stance} onChange={(e) => setForm({ ...form, stance: e.target.value || "balanced" })}>
+                {STANCE_OPTIONS.map((x) => <option key={x} value={x}>{x}</option>)}
+              </select>
+            </div>
+            <div>
+              <LabelWithTooltip
+                text="Primary Goal"
+                tooltip="What you want this content to achieve. Example: educate, entertain, promote something, start a discussion, or drive sign-ups."
+              />
+              <select value={form.primary_goal} onChange={(e) => setForm({ ...form, primary_goal: e.target.value || "" })}>
+                {PRIMARY_GOAL_OPTIONS.map((x) => <option key={x || "none"} value={x}>{x || "(none)"}</option>)}
+              </select>
+            </div>
+            <div>
+              <LabelWithTooltip
+                text="Desired Action"
+                tooltip="What you want people to do after reading. Example: comment, share, follow, click a link, DM you, subscribe, or buy."
+              />
+              <select value={form.desired_action} onChange={(e) => setForm({ ...form, desired_action: e.target.value || "" })}>
+                {DESIRED_ACTION_OPTIONS.map((x) => <option key={x || "none"} value={x}>{x || "(none)"}</option>)}
+              </select>
+            </div>
+            <div>
+              <LabelWithTooltip
+                text="Voice Profile ID"
+                tooltip="Required. Placeholder ID for voice profile linkage. Use any stable value for now (e.g., vp_local_1)."
+              />
+              <input value={form.voice_profile_id || ""} onChange={(e) => setForm({ ...form, voice_profile_id: e.target.value })} />
+            </div>
+            <div>
+              <LabelWithTooltip
+                text="Distribution Targets (optional)"
+                tooltip="Where you might publish this. This doesn’t change the core idea—just helps us prepare formats that fit those platforms later."
+              />
               <div className="row">
                 {TARGETS.map((t) => (
                   <label key={t} className="tag">
@@ -660,7 +816,19 @@ export default function App() {
               </div>
             </div>
           </div>
-          <label>User Content (optional)</label>
+          <LabelWithTooltip
+            text="Constraints (JSON object, optional)"
+            tooltip="Optional rules to guide the output. Use this to enforce must-have points, avoid certain phrases, or add compliance notes. Example keys: must_include, must_avoid, forbidden_claims, compliance_notes, sensitive_topics."
+          />
+          <textarea
+            value={constraintsText}
+            onChange={(e) => setConstraintsText(e.target.value)}
+            placeholder='{"must_include":["..."],"must_avoid":["..."],"forbidden_claims":[],"compliance_notes":"","sensitive_topics":[]}'
+          />
+          <LabelWithTooltip
+            text="User Content (optional)"
+            tooltip="Any raw notes you already have—bullets, a rough draft, links, or context. The more specific this is, the more accurate the output will be."
+          />
           <textarea value={form.user_content || ""} onChange={(e) => setForm({ ...form, user_content: e.target.value })} />
           <div className="row" style={{ marginTop: "12px" }}>
             <button className="primary" disabled={busy || isCheckingProjectData} onClick={onGenerateContent}>
@@ -826,9 +994,10 @@ export default function App() {
           <h2>Artifact Generator</h2>
           <p className="note">Select one or more formats and generate artifacts from finalized content.</p>
           <label>Artifact Formats by Kind</label>
-          {Object.entries(ARTIFACT_FORMATS_BY_KIND).map(([kind, formats]) => {
+          {["text", "image", "gif", "video", "audio"].map((kind) => {
+            const formats = artifactFormatsByKind[kind] || [];
             const selectedCount = formats.filter((fmt) => selectedArtifactFormats.includes(fmt)).length;
-            const allSelected = selectedCount === formats.length;
+            const allSelected = formats.length > 0 && selectedCount === formats.length;
             return (
               <div key={kind} style={{ marginBottom: "12px" }}>
                 <div className="row" style={{ marginBottom: "6px" }}>

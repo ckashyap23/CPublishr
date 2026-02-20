@@ -65,7 +65,7 @@ Project final pointer:
 
 `/nodes/editorial/finalize-selected`:
 - marks selected existing version as final (no new version row).
-- runs downstream Node 4 + adapters.
+- does not auto-run artifact/adapters; generation continues via artifact generator flow.
 
 ## Files You Can Safely Change
 

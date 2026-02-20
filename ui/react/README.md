@@ -5,6 +5,10 @@ Lightweight React UI for end-to-end flow testing.
 ## What it covers
 
 1. Node 0 initialization form with defaults.
+   - includes new context bundle fields:
+     - required: `topic_title`, `core_idea`, `tone_preference`, `voice_profile_id`, `target_audience.primary_segment`
+     - auto-derived: `normalized_topic`
+     - optional: `user_content`, `target_audience.notes`, `audience_familiarity`, `detail_level`, `stance`, `primary_goal`, `desired_action`, `constraints`, `distribution_targets`
 2. Generate content flow (Node 0 -> Node 1 -> Node 2) via:
    - `POST /api/v1/projects/`
    - `POST /api/v1/workflows/nodes/research`

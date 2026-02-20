@@ -33,15 +33,32 @@ from src.utils.ids import new_id
 router = APIRouter()
 
 
+def _normalize_target_audience(value):
+    if isinstance(value, dict) and value.get("primary_segment"):
+        return {
+            "primary_segment": str(value.get("primary_segment")),
+            "notes": (str(value.get("notes")).strip() if value.get("notes") is not None else None),
+        }
+    if isinstance(value, str) and value.strip():
+        return {"primary_segment": "general", "notes": value.strip()}
+    return {"primary_segment": "general", "notes": None}
+
+
 def _context_bundle_from_topic(req: TopicInitializationRequest) -> dict:
     return {
         "topic_title": req.topic_title,
         "normalized_topic": req.topic_title.lower(),
         "core_idea": req.core_idea,
         "user_content": req.user_content,
-        "target_audience": req.target_audience,
-        "content_depth": req.content_depth,
+        "target_audience": _normalize_target_audience(req.target_audience.model_dump()),
+        "audience_familiarity": req.audience_familiarity,
+        "detail_level": req.detail_level,
         "tone_preference": req.tone_preference,
+        "stance": req.stance,
+        "primary_goal": req.primary_goal,
+        "desired_action": req.desired_action,
+        "voice_profile_id": req.voice_profile_id,
+        "constraints": req.constraints,
         "distribution_targets": req.distribution_targets,
     }
 
@@ -50,15 +67,24 @@ def _load_topic_request(project_id: str, db: Session) -> TopicInitializationRequ
     bundle = ProjectRepository(db).get_context_bundle(project_id)
     if not bundle:
         raise HTTPException(status_code=400, detail="Initialize topic (Node 0) first via POST /projects")
+    voice_profile_id = bundle.get("voice_profile_id")
+    if not voice_profile_id:
+        raise HTTPException(status_code=400, detail="Missing required context field: voice_profile_id")
     payload = {
         "project_id": project_id,
         "topic_title": bundle.get("topic_title") or bundle.get("normalized_topic") or "",
         "core_idea": bundle.get("core_idea") or "",
         "user_content": bundle.get("user_content"),
-        "target_audience": bundle.get("target_audience"),
-        "content_depth": bundle.get("content_depth"),
+        "target_audience": _normalize_target_audience(bundle.get("target_audience")),
+        "audience_familiarity": bundle.get("audience_familiarity"),
+        "detail_level": bundle.get("detail_level"),
         "tone_preference": bundle.get("tone_preference") or "professional",
-        "distribution_targets": bundle.get("distribution_targets") or [],
+        "stance": bundle.get("stance") or "balanced",
+        "primary_goal": bundle.get("primary_goal"),
+        "desired_action": bundle.get("desired_action"),
+        "voice_profile_id": voice_profile_id,
+        "constraints": bundle.get("constraints"),
+        "distribution_targets": bundle.get("distribution_targets"),
     }
     return TopicInitializationRequest.model_validate(payload)
 
