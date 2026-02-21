@@ -10,6 +10,7 @@ class PublishJob(Base):
     __tablename__ = "publish_jobs"
 
     publish_job_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), nullable=False, index=True)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.project_id"), nullable=False)
     platform: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="published", nullable=False)

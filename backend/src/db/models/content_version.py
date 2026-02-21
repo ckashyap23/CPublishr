@@ -10,6 +10,7 @@ class ContentVersion(Base):
     __tablename__ = "content_versions"
 
     version_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), nullable=False, index=True)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.project_id"), nullable=False)
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     version_kind: Mapped[str] = mapped_column(String(32), default="base", nullable=False)

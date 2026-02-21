@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from src.api.dependencies import get_db
+from src.api.dependencies import get_current_user_id, get_db
 from src.contracts.prd import ContentVersionEntity, ContentVersionKind, ContentVersionListResponse
 from src.db.repositories.content_repository import ContentRepository
 from src.schemas.workflow import VersionKeywordsPatchRequest, VersionKeywordsPatchResponse
@@ -27,8 +27,12 @@ def _to_content_version_entity(repo: ContentRepository, v) -> ContentVersionEnti
 
 
 @router.get("/{project_id}", response_model=ContentVersionListResponse)
-def list_versions(project_id: str, db: Session = Depends(get_db)) -> ContentVersionListResponse:
-    repo = ContentRepository(db)
+def list_versions(
+    project_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> ContentVersionListResponse:
+    repo = ContentRepository(db, user_id=user_id)
     versions = repo.list_versions(project_id)
     return ContentVersionListResponse(
         project_id=project_id,
@@ -40,9 +44,10 @@ def list_versions(project_id: str, db: Session = Depends(get_db)) -> ContentVers
 def list_versions_by_kind(
     project_id: str,
     version_kind: ContentVersionKind,
+    user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> ContentVersionListResponse:
-    repo = ContentRepository(db)
+    repo = ContentRepository(db, user_id=user_id)
     versions = repo.list_versions_by_kind(project_id, version_kind)
     return ContentVersionListResponse(
         project_id=project_id,
@@ -55,9 +60,10 @@ def patch_version_keywords(
     project_id: str,
     version_number: int,
     payload: VersionKeywordsPatchRequest,
+    user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> VersionKeywordsPatchResponse:
-    repo = ContentRepository(db)
+    repo = ContentRepository(db, user_id=user_id)
     updated = repo.update_keywords(project_id, version_number, payload.keywords)
     if updated is None:
         raise HTTPException(status_code=404, detail="Content version not found")

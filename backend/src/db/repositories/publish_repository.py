@@ -10,8 +10,9 @@ from src.db.models.publish_job import PublishJob
 
 
 class PublishRepository:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, user_id: str):
         self.db = db
+        self.user_id = user_id
 
     def create_job(
         self,
@@ -27,6 +28,7 @@ class PublishRepository:
     ) -> PublishJob:
         job = PublishJob(
             publish_job_id=publish_job_id,
+            user_id=self.user_id,
             project_id=project_id,
             platform=platform,
             status=status,
@@ -41,6 +43,12 @@ class PublishRepository:
         return job
 
     def list_jobs_for_project(self, project_id: str, limit: int = 50) -> list[PublishJob]:
-        stmt = select(PublishJob).where(PublishJob.project_id == project_id).limit(limit)
+        stmt = (
+            select(PublishJob)
+            .where(PublishJob.user_id == self.user_id)
+            .where(PublishJob.project_id == project_id)
+            .limit(limit)
+        )
         return list(self.db.execute(stmt).scalars().all())
+
 

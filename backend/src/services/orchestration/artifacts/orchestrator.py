@@ -17,11 +17,12 @@ from src.utils.ids import new_id
 class ArtifactPipelineOrchestrator:
     """Per-format artifact generation pipeline (no stage fan-out)."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, user_id: str):
         self.db = db
-        self.projects = ProjectRepository(db)
-        self.contents = ContentRepository(db)
-        self.artifacts = ArtifactRepository(db)
+        self.user_id = user_id
+        self.projects = ProjectRepository(db, user_id=user_id)
+        self.contents = ContentRepository(db, user_id=user_id)
+        self.artifacts = ArtifactRepository(db, user_id=user_id)
 
     @staticmethod
     def _merge_tags(seed_keywords: list[str], payload: dict[str, Any], existing: list[str] | None = None) -> list[str]:
@@ -54,6 +55,7 @@ class ArtifactPipelineOrchestrator:
         normalized_formats = [f for f in requested_formats if f in supported]
 
         return PipelineContext(
+            user_id=self.user_id,
             project_id=project_id,
             context_bundle=bundle,
             topic_title=topic_title,

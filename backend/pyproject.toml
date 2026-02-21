@@ -15,12 +15,14 @@ dependencies = [
   "sqlalchemy>=2.0.30",
   "psycopg[binary]>=3.1.19",
   "python-jose[cryptography]>=3.3.0",
+  "azure-storage-blob>=12.22.0",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.2.0",
   "ruff>=0.5.0",
+  "alembic>=1.13.0",
 ]
 
 [tool.pytest.ini_options]
