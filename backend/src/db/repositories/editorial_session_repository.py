@@ -2,18 +2,21 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.db.models.editorial_session import EditorialSession
 
 
 class EditorialSessionRepository:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, user_id: str):
         self.db = db
+        self.user_id = user_id
 
     def create(self, *, session_id: str, project_id: str, base_version: int, working_content: str) -> EditorialSession:
         s = EditorialSession(
             session_id=session_id,
+            user_id=self.user_id,
             project_id=project_id,
             base_version=base_version,
             current_iteration=1,
@@ -26,7 +29,13 @@ class EditorialSessionRepository:
         return s
 
     def get(self, session_id: str) -> EditorialSession | None:
-        return self.db.get(EditorialSession, session_id)
+        stmt = (
+            select(EditorialSession)
+            .where(EditorialSession.user_id == self.user_id)
+            .where(EditorialSession.session_id == session_id)
+            .limit(1)
+        )
+        return self.db.execute(stmt).scalars().first()
 
     def update_iteration(self, *, session_id: str, working_content: str) -> EditorialSession:
         s = self.get(session_id)

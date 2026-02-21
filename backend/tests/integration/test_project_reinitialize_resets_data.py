@@ -20,8 +20,23 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
+def _auth(client: TestClient) -> tuple[dict[str, str], str, str]:
+    slug = uuid4().hex[:10]
+    email = f"tester_{slug}@example.com"
+    res = client.post(
+        "/api/v1/auth/signup",
+        json={"user_id": f"usr_{slug}", "email": email, "password": "Passw0rd123"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    token = data["access_token"]
+    user_id = data["user"]["user_id"]
+    return {"Authorization": f"Bearer {token}"}, data["default_voice_profile_id"], user_id
+
+
 def test_project_initialize_resets_project_scoped_tables() -> None:
     client = _client()
+    headers, voice_profile_id, user_id = _auth(client)
     project_id = f"proj_reset_{uuid4().hex[:8]}"
     payload = {
         "project_id": project_id,
@@ -31,19 +46,19 @@ def test_project_initialize_resets_project_scoped_tables() -> None:
         "target_audience": {"primary_segment": "builders_developers", "notes": None},
         "detail_level": "quick_take",
         "tone_preference": "professional",
-        "voice_profile_id": "vp_test",
+        "voice_profile_id": voice_profile_id,
         "distribution_targets": ["linkedin"],
     }
 
     # First init creates project/context.
-    r = client.post("/api/v1/projects/", json=payload)
+    r = client.post("/api/v1/projects/", json=payload, headers=headers)
     assert r.status_code == 200
 
     # Seed project-scoped rows to verify they are removed on re-init.
     with SessionLocal() as db:
-        content_repo = ContentRepository(db)
-        publish_repo = PublishRepository(db)
-        editorial_repo = EditorialSessionRepository(db)
+        content_repo = ContentRepository(db, user_id=user_id)
+        publish_repo = PublishRepository(db, user_id=user_id)
+        editorial_repo = EditorialSessionRepository(db, user_id=user_id)
 
         content_repo.create_version(
             version_id=new_id("ver"),
@@ -75,14 +90,14 @@ def test_project_initialize_resets_project_scoped_tables() -> None:
         )
 
     # Re-init should wipe old project-scoped rows.
-    r = client.post("/api/v1/projects/", json=payload)
+    r = client.post("/api/v1/projects/", json=payload, headers=headers)
     assert r.status_code == 200
 
-    versions = client.get(f"/api/v1/versions/{project_id}").json()["versions"]
-    outputs = client.get(f"/api/v1/platform-outputs/{project_id}").json()["outputs"]
+    versions = client.get(f"/api/v1/versions/{project_id}", headers=headers).json()["versions"]
+    outputs = client.get(f"/api/v1/platform-outputs/{project_id}", headers=headers).json()["outputs"]
     assert versions == []
     assert outputs == []
 
     with SessionLocal() as db:
-        jobs = PublishRepository(db).list_jobs_for_project(project_id)
+        jobs = PublishRepository(db, user_id=user_id).list_jobs_for_project(project_id)
         assert jobs == []

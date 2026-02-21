@@ -15,3 +15,8 @@ backend/.env
 # frontend
 ui/react/node_modules/
 ui/react/dist/
+
+# local tooling / scratch
+.venv_dbinspect/
+scripts/_dbinspect_*.py
+Voiceprofile.md

@@ -8,8 +8,9 @@ from src.services.orchestration.artifact_schema import derive_kind
 
 
 class ArtifactRepository:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, user_id: str):
         self.db = db
+        self.user_id = user_id
 
     def create_artifact(
         self,
@@ -27,6 +28,7 @@ class ArtifactRepository:
         resolved_kind = derive_kind(format)
         artifact = Artifact(
             artifact_id=artifact_id,
+            user_id=self.user_id,
             project_id=project_id,
             format=format,
             kind=resolved_kind,
@@ -43,12 +45,18 @@ class ArtifactRepository:
         return artifact
 
     def list_artifacts(self, project_id: str) -> list[Artifact]:
-        stmt = select(Artifact).where(Artifact.project_id == project_id).order_by(Artifact.created_at.asc())
+        stmt = (
+            select(Artifact)
+            .where(Artifact.user_id == self.user_id)
+            .where(Artifact.project_id == project_id)
+            .order_by(Artifact.created_at.asc())
+        )
         return list(self.db.execute(stmt).scalars().all())
 
     def list_artifacts_by_format(self, project_id: str, format: str) -> list[Artifact]:
         stmt = (
             select(Artifact)
+            .where(Artifact.user_id == self.user_id)
             .where(Artifact.project_id == project_id)
             .where(Artifact.format == format)
             .order_by(Artifact.created_at.asc())
@@ -58,6 +66,7 @@ class ArtifactRepository:
     def list_artifacts_by_kind(self, project_id: str, kind: str) -> list[Artifact]:
         stmt = (
             select(Artifact)
+            .where(Artifact.user_id == self.user_id)
             .where(Artifact.project_id == project_id)
             .where(Artifact.kind == kind)
             .order_by(Artifact.created_at.asc())
@@ -67,6 +76,7 @@ class ArtifactRepository:
     def get_latest_by_format(self, project_id: str, format: str) -> Artifact | None:
         stmt = (
             select(Artifact)
+            .where(Artifact.user_id == self.user_id)
             .where(Artifact.project_id == project_id)
             .where(Artifact.format == format)
             .order_by(Artifact.revision.desc(), Artifact.created_at.desc())
@@ -113,6 +123,11 @@ class ArtifactRepository:
         )
 
     def delete_artifacts_for_project(self, project_id: str) -> int:
-        rows = self.db.query(Artifact).filter(Artifact.project_id == project_id).delete(synchronize_session=False)
+        rows = (
+            self.db.query(Artifact)
+            .filter(Artifact.user_id == self.user_id)
+            .filter(Artifact.project_id == project_id)
+            .delete(synchronize_session=False)
+        )
         self.db.commit()
         return int(rows or 0)

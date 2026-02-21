@@ -10,6 +10,7 @@ class EditorialSession(Base):
     __tablename__ = "editorial_sessions"
 
     session_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), nullable=False, index=True)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.project_id"), nullable=False)
     base_version: Mapped[int] = mapped_column(Integer, nullable=False)
     current_iteration: Mapped[int] = mapped_column(Integer, default=1, nullable=False)

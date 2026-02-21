@@ -145,6 +145,7 @@ class MasterContentNode(OrchestrationNode):
     Generates canonical platform-agnostic master content using:
     - context_bundle (user inputs + constraints)
     - research schema outputs
+    - optional resolved voice profile (context.state["voice_profile"])
 
     Output contract is preserved:
       {
@@ -154,8 +155,9 @@ class MasterContentNode(OrchestrationNode):
         "master_variants": list[{label, master_document, structure_outline, core_arguments}]
       }
 
-    Note: artifact agents use entire master_document + core_arguments.
-    Therefore, structure is a QUALITY tool (conditional) rather than a dependency.
+    IMPORTANT:
+    - If user did NOT provide voice_profile_id, we MUST NOT use any voice profile
+      even if context.state contains one from a prior run.
     """
 
     name = "master_content"
@@ -199,6 +201,13 @@ class MasterContentNode(OrchestrationNode):
         return s if s in allowed else default
 
     @staticmethod
+    def _normalize_voice_profile_id(value: Any) -> str:
+        s = str(value or "").strip()
+        if not s or s.lower() in ("(none)", "none", "null", "not specified"):
+            return ""
+        return s
+
+    @staticmethod
     def _get_audience_inputs(b: Dict[str, Any]) -> Tuple[str, str]:
         """
         Supports:
@@ -217,7 +226,6 @@ class MasterContentNode(OrchestrationNode):
 
         a = (audience or "general").strip().lower()
 
-        # Common aliases -> playbook keys
         aliases = {
             # New schema values
             "creators_influencers": "creators",
@@ -259,10 +267,6 @@ class MasterContentNode(OrchestrationNode):
 
     @staticmethod
     def _format_research_context(r: Dict[str, Any]) -> str:
-        """
-        Packs research schema into a single string for model grounding.
-        Keeps your research logic the same; just makes it easier for the LLM to use.
-        """
         def _as_list(key: str) -> List[str]:
             v = r.get(key)
             if isinstance(v, list):
@@ -302,6 +306,42 @@ class MasterContentNode(OrchestrationNode):
         return "\n".join(lines).strip()
 
     @staticmethod
+    def _compact_voice_block(voice: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Keep prompt payload compact and stable.
+        """
+        if not isinstance(voice, dict):
+            return {}
+
+        def _as_list(x: Any) -> List[str]:
+            if isinstance(x, list):
+                return [str(i).strip() for i in x if str(i).strip()]
+            return []
+
+        exemplars: List[dict] = []
+        ex = voice.get("exemplars")
+        if isinstance(ex, list):
+            for item in ex[:4]:
+                if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip():
+                    exemplars.append(
+                        {
+                            "text": item["text"].strip()[:200],
+                            "tags": item.get("tags") if isinstance(item.get("tags"), list) else [],
+                        }
+                    )
+                elif isinstance(item, str) and item.strip():
+                    exemplars.append({"text": item.strip()[:200], "tags": []})
+
+        return {
+            "core_voice": str(voice.get("core_voice") or "not specified"),
+            "tone_baseline": voice.get("tone_baseline") if isinstance(voice.get("tone_baseline"), dict) else {},
+            "style_summary": voice.get("style_summary") if isinstance(voice.get("style_summary"), dict) else {},
+            "do_rules": _as_list(voice.get("do_rules"))[:8],
+            "dont_rules": _as_list(voice.get("dont_rules"))[:8],
+            "exemplars": exemplars[:4],
+        }
+
+    @staticmethod
     def _build_editorial_brief(
         target_audience: str,
         target_audience_notes: str,
@@ -312,11 +352,12 @@ class MasterContentNode(OrchestrationNode):
         primary_goal: str,
         desired_action: str,
         constraints: Dict[str, Any],
+        voice_block: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         a = AUDIENCE_PLAYBOOK.get(target_audience, AUDIENCE_PLAYBOOK["general"])
         goal = GOAL_PLAYBOOK.get(primary_goal, {})
 
-        return {
+        brief: Dict[str, Any] = {
             "audience": {
                 "segment": target_audience,
                 "notes": target_audience_notes,
@@ -345,15 +386,13 @@ class MasterContentNode(OrchestrationNode):
             "constraints": constraints,
         }
 
+        if voice_block:
+            brief["voice"] = voice_block
+
+        return brief
+
     @staticmethod
     def _choose_structure_policy(primary_goal: str, detail_level: str, tone_preference: str) -> str:
-        """
-        Returns: "structured" | "freeform"
-
-        Intent:
-        - structured helps clarity and repurposability for education/authority/promo
-        - freeform helps entertainment/informal content
-        """
         g = (primary_goal or "").strip().lower()
         d = (detail_level or "").strip().lower()
         t = (tone_preference or "").strip().lower()
@@ -361,19 +400,14 @@ class MasterContentNode(OrchestrationNode):
         if g == "entertain":
             return "freeform"
 
-        # If explicitly shallow + playful, allow freeform
         playful = any(x in t for x in ("witty", "fun", "casual", "playful", "humor", "humorous", "informal"))
         if d == "quick_take" and playful:
             return "freeform"
 
-        # Otherwise default to structured (better for quality + reuse)
         return "structured"
 
     @staticmethod
     def _is_compliant_structured(doc: str) -> bool:
-        """
-        Checks compliance only for STRUCTURED mode.
-        """
         if not doc or not isinstance(doc, str):
             return False
 
@@ -401,10 +435,6 @@ class MasterContentNode(OrchestrationNode):
         research_context: str,
         title: str,
     ) -> str:
-        """
-        Repairs STRUCTURED markdown to meet heading/bullet rules.
-        Only used when policy == structured.
-        """
         if not (self.llm and self.llm.enabled):
             return bad_doc
 
@@ -419,7 +449,7 @@ Rules:
 - First sentence under '## Core Idea' must preserve meaning of: {core_idea}
 - Do NOT invent statistics, named entities, or factual claims not supported by research_context.
   If something is unknown, write "not specified".
-- Respect constraints in editorial brief.
+- Respect constraints and (if present) voice guidance in editorial brief.
 
 Editorial brief:
 {editorial_brief}
@@ -445,17 +475,9 @@ Document to fix:
 
     @staticmethod
     def _derive_outline_freeform(document: str) -> List[str]:
-        """
-        For freeform content:
-        - Prefer H2 headings if present.
-        - Else return minimal beats.
-        """
         h2s = MasterContentNode._extract_markdown_h2_headings(document)
         if h2s:
-            # Use up to 10 headings to avoid huge outlines
             return [str(x) for x in h2s[:10]]
-
-        # Lightweight beat fallback
         return ["Hook", "Body", "Close"]
 
     @staticmethod
@@ -523,7 +545,6 @@ Document to fix:
 
     @staticmethod
     def _fallback_core_arguments(title: str, core: str) -> List[str]:
-        # Safe minimal fallback
         bits = []
         if title.strip():
             bits.append(title.strip())
@@ -546,7 +567,7 @@ Document to fix:
         # Audience inputs (constraints only; not emitted in output contract)
         target_audience, target_audience_notes = self._get_audience_inputs(b)
 
-        # Normalize enums so prompts are deterministic
+        # Enums
         audience_familiarity = self._normalize_enum(
             b.get("audience_familiarity"),
             ["new", "somewhat_familiar", "very_familiar"],
@@ -558,12 +579,27 @@ Document to fix:
             "practical",
         )
         tone_preference = str(b.get("tone_preference") or "professional").strip()
-        stance = self._normalize_enum(b.get("stance"), ["neutral", "supportive", "contrarian", "balanced"], "balanced")
+        stance = self._normalize_enum(
+            b.get("stance"),
+            ["neutral", "supportive", "contrarian", "balanced"],
+            "balanced",
+        )
 
         primary_goal = str(b.get("primary_goal") or "not specified").strip().lower()
         desired_action = str(b.get("desired_action") or "not specified").strip().lower()
 
-        voice_profile_id = str(b.get("voice_profile_id") or "not specified").strip()  # placeholder only
+        # Voice: ONLY use if user provided voice_profile_id
+        voice_profile_id = self._normalize_voice_profile_id(b.get("voice_profile_id"))
+        voice_block: Optional[Dict[str, Any]] = None
+        if voice_profile_id:
+            vp = context.state.get("voice_profile")
+            # Use only if it matches the requested id (avoid stale state)
+            if isinstance(vp, dict) and str(vp.get("voice_profile_id") or "") == voice_profile_id:
+                voice_block = self._compact_voice_block(vp)
+            else:
+                # resolver may not have run; proceed without voice rather than auto-fetch here
+                voice_block = None
+
         constraints = self._normalize_constraints(b.get("constraints"))
 
         research_context = self._format_research_context(r)
@@ -592,6 +628,7 @@ Document to fix:
             "core_arguments": self._fallback_core_arguments(title, core),
             "variants": [],
         }
+        used_base_llm = False
 
         if self.llm and self.llm.enabled:
             editorial_brief = self._build_editorial_brief(
@@ -604,12 +641,10 @@ Document to fix:
                 primary_goal=primary_goal,
                 desired_action=desired_action,
                 constraints=constraints,
+                voice_block=voice_block,
             )
 
-            # ----------------------------
-            # Prompts (policy dependent)
-            # ----------------------------
-
+            # Prompts depend on structure policy
             if structure_policy == "structured":
                 policy_rules = f"""
 STRUCTURE POLICY: STRUCTURED
@@ -638,6 +673,15 @@ Rules for master_document:
                     '(e.g., ["Hook","Setup","Twist","Punchline","Close"]).'
                 )
 
+            voice_rules = ""
+            if voice_block:
+                voice_rules = """
+Voice rules (apply if present in editorial brief):
+- Mimic cadence, phrasing tendencies, formatting habits, and CTA style.
+- Use exemplars for inspiration; do NOT copy long sentences verbatim.
+- If voice rules conflict with constraints, constraints win.
+"""
+
             base_system_prompt = f"""
 You are an expert editorial writer generating CANONICAL master content (platform-agnostic).
 
@@ -645,6 +689,7 @@ Apply this editorial brief STRICTLY:
 {editorial_brief}
 
 {policy_rules}
+{voice_rules}
 
 Factuality rules:
 - Do NOT invent statistics, named entities, or factual claims not supported by research_context.
@@ -669,7 +714,6 @@ Inputs:
 - core_idea (preserve meaning): {core}
 - user_content: {user_content if user_content else "not specified"}
 - research_context (facts source; do not add facts beyond this): {research_context}
-- voice_profile_id (placeholder only): {voice_profile_id}
 
 Requirements:
 - master_document: follow the structure policy above and the editorial brief.
@@ -690,8 +734,8 @@ Requirements:
                     logger.warning("MasterContentNode: base LLM output not parseable JSON; using fallback.")
                 else:
                     base_document = str(parsed.get("master_document") or fallback_master).strip()
+                    used_base_llm = True
 
-                    # Structured-only: validate/repair so downstream sees stable formatting when expected
                     if structure_policy == "structured" and not self._is_compliant_structured(base_document):
                         base_document = self._repair_structured(
                             bad_doc=base_document,
@@ -701,7 +745,6 @@ Requirements:
                             title=title,
                         )
 
-                    # Outline handling (policy dependent)
                     structure_outline = parsed.get("structure_outline")
                     if isinstance(structure_outline, list) and structure_outline:
                         base_outline = [str(x).strip() for x in structure_outline if str(x).strip()]
@@ -709,16 +752,10 @@ Requirements:
                         base_outline = []
 
                     if structure_policy == "structured":
-                        # Enforce stable outline for structured mode
                         base_outline = STRUCTURED_HEADINGS[:]
                     else:
-                        # Freeform: if outline empty, derive from headings if present else minimal beats
-                        if not base_outline:
-                            base_outline = self._derive_outline_freeform(base_document)
-                        else:
-                            base_outline = base_outline[:10]
+                        base_outline = base_outline[:10] if base_outline else self._derive_outline_freeform(base_document)
 
-                    # Core arguments
                     core_arguments = parsed.get("core_arguments")
                     if not isinstance(core_arguments, list) or not core_arguments:
                         core_arguments = self._fallback_core_arguments(title, core)
@@ -732,9 +769,7 @@ Requirements:
                         "variants": [],
                     }
 
-                    # ----------------------------
-                    # Variants (separate calls)
-                    # ----------------------------
+                    # Variants
                     for spec in variants:
                         eff_user, eff_research = self._effective_weights(user_content, spec.weight_user, spec.weight_research)
                         variant_directive = self._variant_directive(spec, stance, primary_goal, desired_action)
@@ -746,10 +781,10 @@ Requirements:
                         )
                         research_anchor = f"Anchor ~{int(eff_research*100)}% of grounded points to research_context."
 
-                        # Temperature tuning: a bit freer for entertain + narrative
-                        temp = 0.6 if (primary_goal == "entertain" and spec.structure == "narrative_first") else (0.4 if structure_policy == "freeform" else 0.35)
+                        temp = 0.6 if (primary_goal == "entertain" and spec.structure == "narrative_first") else (
+                            0.4 if structure_policy == "freeform" else 0.35
+                        )
 
-                        # Policy-specific variant rules
                         if structure_policy == "structured":
                             variant_policy_rules = f"""
 Variant must follow STRUCTURED policy:
@@ -796,7 +831,6 @@ Inputs:
 - core_idea (preserve meaning): {core}
 - user_content: {user_content if user_content else "not specified"}
 - research_context (facts source; do not add facts beyond this): {research_context}
-- voice_profile_id (placeholder only): {voice_profile_id}
 
 Rules:
 {variant_policy_rules}
@@ -822,7 +856,6 @@ Also:
                             if not v_doc:
                                 continue
 
-                            # Structured-only: validate/repair
                             if structure_policy == "structured" and not self._is_compliant_structured(v_doc):
                                 v_doc = self._repair_structured(
                                     bad_doc=v_doc,
@@ -832,7 +865,6 @@ Also:
                                     title=title,
                                 )
 
-                            # Outline extraction / fallback
                             v_outline_raw = v_parsed.get("structure_outline")
                             if isinstance(v_outline_raw, list) and v_outline_raw:
                                 v_outline = [str(x).strip() for x in v_outline_raw if str(x).strip()]
@@ -842,15 +874,12 @@ Also:
                             if structure_policy == "structured":
                                 v_outline = STRUCTURED_HEADINGS[:]
                             else:
-                                if not v_outline:
-                                    v_outline = self._derive_outline_freeform(v_doc)
-                                else:
-                                    v_outline = v_outline[:10]
+                                v_outline = v_outline[:10] if v_outline else self._derive_outline_freeform(v_doc)
 
                             out["variants"].append(
                                 {
                                     "id": spec.id,
-                                    "label": spec.label,  # canonical label
+                                    "label": spec.label,
                                     "levers": {
                                         "weight_user": float((v_parsed.get("levers") or {}).get("weight_user") or eff_user),
                                         "weight_research": float((v_parsed.get("levers") or {}).get("weight_research") or eff_research),
@@ -877,11 +906,9 @@ Also:
             "master_variants": [],
         }
 
-        # Normalize base outline a bit
         if not contract_out["structure_outline"]:
             contract_out["structure_outline"] = fallback_outline
 
-        # Add variants (same contract fields as before)
         for variant in out.get("variants") or []:
             if not isinstance(variant, dict):
                 continue
@@ -894,10 +921,7 @@ Also:
             if isinstance(variant_outline, list) and variant_outline:
                 normalized_outline = [str(x) for x in variant_outline if str(x).strip()]
             else:
-                normalized_outline = (
-                    STRUCTURED_HEADINGS[:] if structure_policy == "structured"
-                    else self._derive_outline_freeform(document)
-                )
+                normalized_outline = STRUCTURED_HEADINGS[:] if structure_policy == "structured" else self._derive_outline_freeform(document)
 
             contract_out["master_variants"].append(
                 {
@@ -908,6 +932,12 @@ Also:
                 }
             )
 
+        logger.info(
+            "MasterContentNode complete: source=%s llm_enabled=%s variants=%s",
+            "llm" if used_base_llm else "fallback",
+            bool(self.llm and self.llm.enabled),
+            len(contract_out["master_variants"]),
+        )
         context.state["master"] = contract_out
         return NodeExecutionResult(status="completed", output_payload=contract_out)
         

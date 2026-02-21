@@ -17,6 +17,7 @@ class ArtifactDraft:
 
 @dataclass
 class PipelineContext:
+    user_id: str
     project_id: str
     context_bundle: dict[str, Any]
     topic_title: str

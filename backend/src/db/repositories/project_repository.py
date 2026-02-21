@@ -16,17 +16,24 @@ from src.schemas.context_bundle import ContextBundleV1
 
 
 class ProjectRepository:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, user_id: str):
         self.db = db
+        self.user_id = user_id
 
     def get(self, project_id: str) -> Project | None:
-        return self.db.get(Project, project_id)
+        stmt = (
+            select(Project)
+            .where(Project.user_id == self.user_id)
+            .where(Project.project_id == project_id)
+            .limit(1)
+        )
+        return self.db.execute(stmt).scalars().first()
 
     def get_or_create(self, project_id: str, *, status: str = "draft") -> Project:
         p = self.get(project_id)
         if p is not None:
             return p
-        p = Project(project_id=project_id, status=status)
+        p = Project(project_id=project_id, user_id=self.user_id, status=status)
         self.db.add(p)
         self.db.commit()
         self.db.refresh(p)
@@ -35,31 +42,37 @@ class ProjectRepository:
     def reset_project_data(self, project_id: str) -> dict[str, int]:
         deleted_versions = (
             self.db.query(ContentVersion)
+            .filter(ContentVersion.user_id == self.user_id)
             .filter(ContentVersion.project_id == project_id)
             .delete(synchronize_session=False)
         )
         deleted_outputs = (
             self.db.query(PlatformOutput)
+            .filter(PlatformOutput.user_id == self.user_id)
             .filter(PlatformOutput.project_id == project_id)
             .delete(synchronize_session=False)
         )
         deleted_jobs = (
             self.db.query(PublishJob)
+            .filter(PublishJob.user_id == self.user_id)
             .filter(PublishJob.project_id == project_id)
             .delete(synchronize_session=False)
         )
         deleted_sessions = (
             self.db.query(EditorialSession)
+            .filter(EditorialSession.user_id == self.user_id)
             .filter(EditorialSession.project_id == project_id)
             .delete(synchronize_session=False)
         )
         deleted_artifacts = (
             self.db.query(Artifact)
+            .filter(Artifact.user_id == self.user_id)
             .filter(Artifact.project_id == project_id)
             .delete(synchronize_session=False)
         )
         deleted_project_rows = (
             self.db.query(Project)
+            .filter(Project.user_id == self.user_id)
             .filter(Project.project_id == project_id)
             .delete(synchronize_session=False)
         )
@@ -93,7 +106,12 @@ class ProjectRepository:
             return None
 
     def list_projects(self, limit: int = 50) -> list[Project]:
-        stmt = select(Project).order_by(Project.created_at.desc()).limit(limit)
+        stmt = (
+            select(Project)
+            .where(Project.user_id == self.user_id)
+            .order_by(Project.created_at.desc())
+            .limit(limit)
+        )
         return list(self.db.execute(stmt).scalars().all())
 
     def set_final_version(self, project_id: str, final_version_number: int) -> Project:

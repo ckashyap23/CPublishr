@@ -13,6 +13,7 @@ class Artifact(Base):
     )
 
     artifact_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), nullable=False, index=True)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.project_id"), nullable=False)
     format: Mapped[str] = mapped_column(String(64), nullable=False)
     kind: Mapped[str] = mapped_column(String(16), nullable=False)

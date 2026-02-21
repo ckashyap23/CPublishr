@@ -1,42 +1,24 @@
 # React UI (Current)
 
-Lightweight React UI for end-to-end flow testing.
+Voice-profile module UI for the current backend surface.
 
 ## What it covers
 
-1. Node 0 initialization form with defaults.
-   - includes new context bundle fields:
-     - required: `topic_title`, `core_idea`, `tone_preference`, `voice_profile_id`, `target_audience.primary_segment`
-     - auto-derived: `normalized_topic`
-     - optional: `user_content`, `target_audience.notes`, `audience_familiarity`, `detail_level`, `stance`, `primary_goal`, `desired_action`, `constraints`, `distribution_targets`
-2. Generate content flow (Node 0 -> Node 1 -> Node 2) via:
-   - `POST /api/v1/projects/`
-   - `POST /api/v1/workflows/nodes/research`
-   - `POST /api/v1/workflows/nodes/master`
-3. Setup behavior for existing projects:
-   - if project has existing versions, show:
-     - `Retrieve Content` (jump to Editorial)
-     - `Generate Content` (fresh run path)
-4. Node audit panel:
-   - scrollable per-node output for Node 0/1/2
-   - status badges: running/completed/failed
-   - continue-to-editorial button after successful Node 2
-3. Editorial workspace:
-   - version selection
-   - keyword patch
-   - direct finalize selected version (no edit required)
-   - inline edit + save named draft
-   - inline edit + save named draft + finalize
-   - feedback preview
-   - save preview as named draft
-   - save preview as named draft + finalize
-   - save-time version name prompt (asked only when Save is clicked)
-6. Non-blocking top progress bar for content/artifact generation.
-7. Artifacts workspace:
-   - format selection grouped by kind
-   - `Generate Artifacts` (`POST /api/v1/artifacts/generate`)
-   - generated artifact viewer as individual format tabs
-   - `View Stored Artifacts` (`GET /api/v1/artifacts/{project_id}`)
+1. Auth
+   - Signup: `user_id`, `email`, `password`
+   - Login: `email`, `password`
+   - Current user fetch: `GET /api/v1/auth/me`
+2. Voice profile collections
+   - Create collection with profile name + multi-platform selection
+   - List collections for the logged-in user
+   - Load collection detail with versions
+3. Generate version from dataset inputs
+   - Supports one or more datasets per generation request
+   - Fields per dataset: `dataset_id` (optional), `dataset_name`, `source_profile` (optional), `blob_prefix`, `sample_scope_note` (optional)
+4. Version controls
+   - View generated version detail payloads
+   - Activate selected version
+   - Update status (`draft/generated/approved/rejected/failed`)
 
 ## Run
 

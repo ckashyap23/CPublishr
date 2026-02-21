@@ -16,6 +16,7 @@ from src.db.repositories.artifact_repository import ArtifactRepository
 from src.db.repositories.content_repository import ContentRepository
 from src.db.repositories.editorial_session_repository import EditorialSessionRepository
 from src.db.repositories.project_repository import ProjectRepository
+from src.db.repositories.voice_profile_module_repository import VoiceProfileModuleRepository
 from src.services.orchestration.artifact_schema import allowed_formats
 from src.services.llm.azure_openai import AzureOpenAIClient
 from src.services.orchestration.artifacts.contracts import GenerationOptions
@@ -25,6 +26,7 @@ from src.services.orchestration.nodes.editorial import EditorialNode
 from src.services.orchestration.nodes.master_content import MasterContentNode
 from src.services.orchestration.nodes.research_trends import ResearchTrendsNode
 from src.services.orchestration.nodes.topic_initialization import TopicInitializationNode
+from src.services.orchestration.nodes.voice_profile_resolve import VoiceProfileResolveNode
 from src.services.platforms.registry import default_platform_registry
 from src.utils.ids import new_id
 
@@ -32,17 +34,20 @@ logger = logging.getLogger(__name__)
 
 
 class OrchestrationEngine:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, user_id: str):
         self.db = db
-        self.projects = ProjectRepository(db)
-        self.content = ContentRepository(db)
-        self.artifacts = ArtifactRepository(db)
-        self.editorial_sessions = EditorialSessionRepository(db)
+        self.user_id = user_id
+        self.projects = ProjectRepository(db, user_id=user_id)
+        self.content = ContentRepository(db, user_id=user_id)
+        self.artifacts = ArtifactRepository(db, user_id=user_id)
+        self.editorial_sessions = EditorialSessionRepository(db, user_id=user_id)
+        self.voice_profiles = VoiceProfileModuleRepository(db, user_id=user_id)
         self.platform_registry = default_platform_registry()
         self.llm = AzureOpenAIClient()
 
         self.node0 = TopicInitializationNode(self.llm)
         self.node1 = ResearchTrendsNode(self.llm)
+        self.node1_5 = VoiceProfileResolveNode(self.voice_profiles)
         self.node2 = MasterContentNode(self.llm)
         self.node3 = EditorialNode(self.llm)
 
@@ -81,6 +86,10 @@ class OrchestrationEngine:
 
         n1 = self.node1.run(ctx)
         ResearchTrendResponse.model_validate(n1.output_payload)
+
+        # Optional preprocessing: resolve active/latest-approved voice profile guidance.
+        # This only runs when context_bundle.voice_profile_id is present.
+        self.node1_5.run(ctx)
 
         n2 = self.node2.run(ctx)
         MasterContentResponse.model_validate(n2.output_payload)
@@ -126,7 +135,7 @@ class OrchestrationEngine:
         # Generate and persist artifacts via per-format builders.
         default_formats = self._default_post_editorial_artifact_formats()
         if default_formats:
-            ArtifactPipelineOrchestrator(self.db).generate(
+            ArtifactPipelineOrchestrator(self.db, user_id=self.user_id).generate(
                 project_id=project_id,
                 requested_formats=list(default_formats),
                 options=GenerationOptions(

@@ -1,8 +1,13 @@
-from src.db.models.artifact import Artifact
-from src.db.models.content_version import ContentVersion
-from src.db.models.editorial_session import EditorialSession
-from src.db.models.platform_output import PlatformOutput
-from src.db.models.project import Project
-from src.db.models.publish_job import PublishJob
+from src.db.models.dataset_entry import DatasetEntry
+from src.db.models.user import User
+from src.db.models.voice_profile_collection import VoiceProfileCollection
+from src.db.models.voice_profile_version import VoiceProfileVersion
+from src.db.models.voice_profile_version_dataset import VoiceProfileVersionDataset
 
-__all__ = ["Project", "ContentVersion", "PlatformOutput", "PublishJob", "EditorialSession", "Artifact"]
+__all__ = [
+    "User",
+    "VoiceProfileCollection",
+    "VoiceProfileVersion",
+    "VoiceProfileVersionDataset",
+    "DatasetEntry",
+]
