@@ -1,6 +1,6 @@
 # CPublishr
 
-Voice-profile-first backend + UI for user-scoped profile generation from blob-backed datasets.
+Backend + React UI for user-scoped content workflows, artifacts, and voice-profile generation.
 
 ## Project Layout
 
@@ -15,9 +15,17 @@ Voice-profile-first backend + UI for user-scoped profile generation from blob-ba
 
 Authentication (required first):
 - `POST /api/v1/auth/signup` with `user_id`, `email`, `password`
-- `POST /api/v1/auth/login` with `email`, `password`
+- `POST /api/v1/auth/login` with `user_id`, `password`
 - Use `Authorization: Bearer <token>` for all protected endpoints
 - `GET /api/v1/auth/me` to fetch current user
+
+Projects / workflow / artifacts (user-scoped):
+- `GET /api/v1/projects/` (list projects for current user)
+- `POST /api/v1/projects/` (initialize/reset Node 0 topic context)
+- `GET /api/v1/projects/{project_id}`
+- `GET /api/v1/versions/{project_id}`
+- `POST /api/v1/artifacts/generate`
+- `GET /api/v1/artifacts/{project_id}`
 
 Voice profile module (user-scoped):
 - `POST /api/v1/voice-profiles/collections`
@@ -28,7 +36,7 @@ Voice profile module (user-scoped):
 - `POST /api/v1/voice-profiles/versions/{voice_profile_version_id}/activate`
 - `POST /api/v1/voice-profiles/versions/{voice_profile_version_id}/status`
 
-Legacy workflow/content/publishing routes are intentionally disabled in this voice-profile-first build.
+Workflow/editorial/artifacts routes are active in the current UI-backed build.
 
 ## Fresh DB Behavior
 

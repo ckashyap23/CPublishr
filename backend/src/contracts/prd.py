@@ -170,6 +170,10 @@ class ProjectEntity(ContractModel):
     created_at: str
 
 
+class ProjectListResponse(ContractModel):
+    projects: list[ProjectEntity]
+
+
 class ContentVersionEntity(ContractModel):
     version_id: str
     project_id: str

@@ -42,10 +42,10 @@ def signup(payload: SignUpRequest, db: Session = Depends(get_db)) -> AuthTokenRe
 
 @router.post("/login", response_model=AuthTokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthTokenResponse:
-    normalized = _normalize_email(payload.email)
-    user = UserRepository(db).get_by_email(normalized)
+    requested_user_id = (payload.user_id or "").strip()
+    user = UserRepository(db).get_by_id(requested_user_id)
     if user is None or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user ID or password")
     token = create_access_token(user_id=user.user_id)
     return AuthTokenResponse(
         access_token=token,

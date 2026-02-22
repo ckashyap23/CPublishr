@@ -58,7 +58,7 @@ Important implementation details:
 ### 1) Signup/Login
 
 - Signup requires: `user_id`, `email`, `password`.
-- Login requires: `email`, `password`.
+- Login requires: `user_id`, `password`.
 - Signup creates one row in `users` and returns bearer token.
 
 Code:

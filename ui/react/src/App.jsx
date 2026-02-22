@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const API_BASE_DEFAULT = "http://127.0.0.1:8010";
 
@@ -144,6 +144,9 @@ export default function App() {
   const [selectedStoredArtifactTab, setSelectedStoredArtifactTab] = useState(0);
   const [isArtifactGenerating, setIsArtifactGenerating] = useState(false);
   const [isStoredArtifactsLoading, setIsStoredArtifactsLoading] = useState(false);
+  const [hasStoredArtifactsForProject, setHasStoredArtifactsForProject] = useState(false);
+  const [isCheckingStoredArtifacts, setIsCheckingStoredArtifacts] = useState(false);
+  const [artifactsViewMode, setArtifactsViewMode] = useState("generate");
 
   const [vpCollections, setVpCollections] = useState([]);
   const [vpSelectedCollectionId, setVpSelectedCollectionId] = useState("");
@@ -157,6 +160,10 @@ export default function App() {
   });
   const [vpStatusInput, setVpStatusInput] = useState("approved");
   const [isVpGenerating, setIsVpGenerating] = useState(false);
+  const [userProjects, setUserProjects] = useState([]);
+  const [isProjectsLoading, setIsProjectsLoading] = useState(false);
+  const contentCheckSeqRef = useRef(0);
+  const storedArtifactsCheckSeqRef = useRef(0);
   const isAuthenticated = !!authToken;
 
   const selectedVersion = useMemo(
@@ -259,26 +266,53 @@ export default function App() {
     }
   }
 
+  async function loadUserProjects() {
+    if (!authToken) {
+      setUserProjects([]);
+      return;
+    }
+    setIsProjectsLoading(true);
+    try {
+      const out = await request("GET", "/api/v1/projects/");
+      const rows = Array.isArray(out?.projects) ? out.projects : [];
+      setUserProjects(rows);
+      const currentProjectId = String(form.project_id || "").trim();
+      const hasCurrent = currentProjectId && rows.some((p) => p?.project_id === currentProjectId);
+      if (!currentProjectId && rows[0]?.project_id) {
+        setForm((prev) => ({ ...prev, project_id: rows[0].project_id }));
+      } else if (!hasCurrent && rows[0]?.project_id) {
+        setForm((prev) => ({ ...prev, project_id: rows[0].project_id }));
+      }
+    } catch {
+      setUserProjects([]);
+    } finally {
+      setIsProjectsLoading(false);
+    }
+  }
+
   async function onAuthSubmit() {
     setError("");
     setMessage("");
     setBusy(true);
     try {
-      if (!authForm.email.trim() || !authForm.password) {
-        throw new Error("Email and password are required.");
+      if (!authForm.password) {
+        throw new Error("Password is required.");
       }
-      if (authMode === "signup" && !authForm.user_id.trim()) {
-        throw new Error("User ID is required for signup.");
+      if (!authForm.user_id.trim()) {
+        throw new Error("User ID is required.");
+      }
+      if (authMode === "signup" && !authForm.email.trim()) {
+        throw new Error("Email is required for signup.");
       }
       const path = authMode === "signup" ? "/api/v1/auth/signup" : "/api/v1/auth/login";
       const payload = authMode === "signup"
         ? { user_id: authForm.user_id.trim(), email: authForm.email.trim(), password: authForm.password }
-        : { email: authForm.email.trim(), password: authForm.password };
+        : { user_id: authForm.user_id.trim(), password: authForm.password };
       const out = await apiRequest(apiBaseUrl, "POST", path, payload, "");
       persistAuthToken(out?.access_token || "");
       setCurrentUser(out?.user || null);
       setAuthForm((prev) => ({ ...prev, password: "" }));
-      setMessage(authMode === "signup" ? "Signed up and logged in." : "Logged in.");
+      setMessage("");
     } catch (e) {
       setError(e.message || String(e));
     } finally {
@@ -289,6 +323,7 @@ export default function App() {
   function onLogout() {
     persistAuthToken("");
     setCurrentUser(null);
+    setUserProjects([]);
     setPage("setup");
     setVpCollections([]);
     setVpSelectedCollectionId("");
@@ -475,21 +510,26 @@ export default function App() {
   }
 
   async function checkExistingContent(projectId) {
-    if (!(projectId || "").trim()) {
+    const normalizedProjectId = (projectId || "").trim();
+    const requestSeq = ++contentCheckSeqRef.current;
+    if (!normalizedProjectId) {
       setHasExistingContent(false);
       return;
     }
     setIsCheckingProjectData(true);
     try {
-      const data = await request("GET", `/api/v1/versions/${projectId}`);
+      const data = await request("GET", `/api/v1/versions/${normalizedProjectId}`);
+      if (requestSeq !== contentCheckSeqRef.current) return;
       const list = data?.versions || [];
       const exists = Array.isArray(list) && list.length > 0;
       setHasExistingContent(exists);
       setShowGenerateSetupForm(!exists);
     } catch {
+      if (requestSeq !== contentCheckSeqRef.current) return;
       setHasExistingContent(false);
       setShowGenerateSetupForm(true);
     } finally {
+      if (requestSeq !== contentCheckSeqRef.current) return;
       setIsCheckingProjectData(false);
     }
   }
@@ -609,6 +649,7 @@ export default function App() {
       });
 
       await refreshVersions(form.project_id);
+      loadUserProjects().catch(() => {});
       setMessage("Node 0-2 completed. Review audit output below, then continue to editorial.");
       setCanContinueToEditorial(true);
     } catch (e) {
@@ -844,18 +885,31 @@ export default function App() {
     setMessage("");
     setBusy(true);
     setIsArtifactGenerating(true);
+    setArtifactsViewMode("generate");
     setArtifactOutput(null);
     setSelectedArtifactTab(0);
     try {
+      const includesImageGeneration = selectedArtifactFormats.includes("image_generation");
+      const imageStyleSettings = includesImageGeneration
+        ? {
+            tool_name: "openai",
+            output_formats: ["png"],
+            size: "1024x1024",
+            quality: "standard",
+            style: "vivid",
+          }
+        : null;
       const out = await request("POST", "/api/v1/artifacts/generate", {
         project_id: form.project_id,
         requested_formats: selectedArtifactFormats,
         revision_mode: "new_revision",
         style_settings: {},
+        style_settings_by_format: imageStyleSettings ? { image_generation: imageStyleSettings } : {},
       });
       setArtifactOutput(out);
       setSelectedArtifactTab(0);
       const count = Array.isArray(out?.artifacts) ? out.artifacts.length : 0;
+      setHasStoredArtifactsForProject(count > 0 || hasStoredArtifactsForProject);
       setMessage(`Generated ${count} artifact(s).`);
     } catch (e) {
       setError(e.message || String(e));
@@ -870,6 +924,7 @@ export default function App() {
     setMessage("");
     setBusy(true);
     setIsStoredArtifactsLoading(true);
+    setArtifactsViewMode("stored");
     try {
       const out = await request("GET", `/api/v1/artifacts/${form.project_id}`);
       const items = Array.isArray(out?.artifacts) ? out.artifacts : [];
@@ -878,12 +933,37 @@ export default function App() {
       setSelectedStoredFormat(formats[0] || "");
       setSelectedStoredArtifactTab(0);
       const count = Array.isArray(out?.artifacts) ? out.artifacts.length : 0;
+      setHasStoredArtifactsForProject(count > 0);
       setMessage(`Loaded ${count} stored artifact(s).`);
     } catch (e) {
+      setHasStoredArtifactsForProject(false);
       setError(e.message || String(e));
     } finally {
       setBusy(false);
       setIsStoredArtifactsLoading(false);
+    }
+  }
+
+  async function checkStoredArtifactsAvailability(projectId) {
+    const normalizedProjectId = (projectId || "").trim();
+    const requestSeq = ++storedArtifactsCheckSeqRef.current;
+    if (!authToken || !normalizedProjectId) {
+      setHasStoredArtifactsForProject(false);
+      setIsCheckingStoredArtifacts(false);
+      return;
+    }
+    setIsCheckingStoredArtifacts(true);
+    try {
+      const out = await request("GET", `/api/v1/artifacts/${normalizedProjectId}`);
+      if (requestSeq !== storedArtifactsCheckSeqRef.current) return;
+      const items = Array.isArray(out?.artifacts) ? out.artifacts : [];
+      setHasStoredArtifactsForProject(items.length > 0);
+    } catch {
+      if (requestSeq !== storedArtifactsCheckSeqRef.current) return;
+      setHasStoredArtifactsForProject(false);
+    } finally {
+      if (requestSeq !== storedArtifactsCheckSeqRef.current) return;
+      setIsCheckingStoredArtifacts(false);
     }
   }
 
@@ -902,6 +982,19 @@ export default function App() {
     const projectId = (form.project_id || "").trim();
     checkExistingContent(projectId);
   }, [form.project_id, apiBaseUrl, isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setHasStoredArtifactsForProject(false);
+      setIsCheckingStoredArtifacts(false);
+      return;
+    }
+    const projectId = (form.project_id || "").trim();
+    setStoredArtifacts([]);
+    setSelectedStoredFormat("");
+    setSelectedStoredArtifactTab(0);
+    checkStoredArtifactsAvailability(projectId);
+  }, [form.project_id, apiBaseUrl, isAuthenticated, authToken]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -926,6 +1019,14 @@ export default function App() {
 
   useEffect(() => {
     if (!authToken) return;
+    loadUserProjects().catch(() => {});
+  }, [authToken, apiBaseUrl]);
+
+  useEffect(() => {
+    if (!authToken) {
+      setUserProjects([]);
+      return;
+    }
     loadVpCollections().catch(() => {});
   }, [authToken, apiBaseUrl]);
 
@@ -951,9 +1052,12 @@ export default function App() {
     <div className="container">
       <div className="card">
         <div className="row" style={{ justifyContent: "space-between" }}>
-          <h1>CPublishr UI</h1>
+          <h1>Publishr</h1>
           {isAuthenticated ? (
-            <button className="secondary" disabled={busy} onClick={() => setPage("settings")}>Settings</button>
+            <div className="row">
+              <button className="secondary" disabled={busy} onClick={() => setPage("settings")}>Settings</button>
+              <button className="secondary" disabled={busy} onClick={onLogout}>Logout</button>
+            </div>
           ) : null}
         </div>
         <p className="note">Lightweight React interface for Node 0-3 flow with editorial actions.</p>
@@ -971,16 +1075,16 @@ export default function App() {
                   <button className={authMode === "signup" ? "primary" : "secondary"} disabled={busy} onClick={() => setAuthMode("signup")}>Signup</button>
                 </div>
               </div>
+              <div>
+                <label>User ID</label>
+                <input value={authForm.user_id} onChange={(e) => setAuthForm({ ...authForm, user_id: e.target.value })} />
+              </div>
               {authMode === "signup" ? (
                 <div>
-                  <label>User ID</label>
-                  <input value={authForm.user_id} onChange={(e) => setAuthForm({ ...authForm, user_id: e.target.value })} />
+                  <label>Email</label>
+                  <input value={authForm.email} onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })} />
                 </div>
               ) : null}
-              <div>
-                <label>Email</label>
-                <input value={authForm.email} onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })} />
-              </div>
               <div>
                 <label>Password</label>
                 <input type="password" value={authForm.password} onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })} />
@@ -1000,7 +1104,19 @@ export default function App() {
               </div>
               <div>
                 <label>Project ID</label>
-                <input value={form.project_id} onChange={(e) => setForm({ ...form, project_id: e.target.value })} />
+                <input
+                  list="user-project-ids"
+                  value={form.project_id}
+                  onChange={(e) => setForm({ ...form, project_id: e.target.value })}
+                />
+                <datalist id="user-project-ids">
+                  {userProjects.map((p) => (
+                    <option key={p.project_id} value={p.project_id} />
+                  ))}
+                </datalist>
+                {page === "setup" && isProjectsLoading ? (
+                  <p className="note" style={{ marginTop: "6px" }}>Loading your projects...</p>
+                ) : null}
                 {page === "setup" && hasExistingContent ? (
                   <div className="row" style={{ marginTop: "8px" }}>
                     <button className="secondary" disabled={busy || isCheckingProjectData} onClick={onRetrieveContent}>
@@ -1026,10 +1142,6 @@ export default function App() {
                   <button className={page === "editorial" ? "primary" : "secondary"} disabled={busy} onClick={() => setPage("editorial")}>Editorial</button>
                   <button className={page === "artifacts" ? "primary" : "secondary"} disabled={busy} onClick={() => setPage("artifacts")}>Artifacts</button>
                 </div>
-              </div>
-              <div>
-                <label>Session</label>
-                <button className="secondary" disabled={busy} onClick={onLogout}>Logout</button>
               </div>
             </>
           )}
@@ -1564,12 +1676,18 @@ export default function App() {
             <button className="primary" disabled={busy} onClick={onGenerateArtifacts}>
               {isArtifactGenerating ? "Generating Artifacts..." : "Generate Artifacts"}
             </button>
-            <button className="secondary" disabled={busy} onClick={onViewStoredArtifacts}>
+            <button
+              className="secondary"
+              disabled={busy || isCheckingStoredArtifacts || !hasStoredArtifactsForProject}
+              onClick={onViewStoredArtifacts}
+            >
               {isStoredArtifactsLoading ? "Loading Stored Artifacts..." : "View Stored Artifacts"}
             </button>
-            <button className="secondary" disabled={busy} onClick={() => setPage("editorial")}>Back to Editorial</button>
           </div>
-          {generatedArtifacts.length > 0 ? (
+          {isCheckingStoredArtifacts ? (
+            <p className="note" style={{ marginTop: "8px" }}>Checking stored artifacts for this project...</p>
+          ) : null}
+          {artifactsViewMode === "generate" && generatedArtifacts.length > 0 ? (
             <>
               <h3 style={{ marginTop: "16px" }}>Generated Artifacts</h3>
               <div className="row" style={{ marginBottom: "8px" }}>
@@ -1589,7 +1707,7 @@ export default function App() {
               ) : null}
             </>
           ) : null}
-          {storedArtifacts.length > 0 ? (
+          {artifactsViewMode === "stored" && storedArtifacts.length > 0 ? (
             <>
               <h3 style={{ marginTop: "16px" }}>Stored Artifacts</h3>
               <div className="grid two">
@@ -1638,4 +1756,5 @@ export default function App() {
     </div>
   );
 }
+
 

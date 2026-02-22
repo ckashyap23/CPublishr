@@ -53,15 +53,9 @@ def generate_artifacts(
         out = orchestrator.generate(
             project_id=payload.project_id,
             requested_formats=[str(x) for x in requested_formats],
-            options=GenerationOptions(
-                run_plan=payload.stages.plan,
-                run_prompt_pack=payload.stages.prompt_pack,
-                run_render_media=payload.stages.render_media,
-                run_assemble=payload.stages.assemble,
-                run_package=payload.stages.package,
-                revision_mode=payload.revision_mode,
-            ),
-            style_settings=payload.style_settings,
+            options=GenerationOptions(revision_mode=payload.revision_mode),
+            style_settings=payload.style_settings or {},
+            style_settings_by_format=payload.style_settings_by_format or {},
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

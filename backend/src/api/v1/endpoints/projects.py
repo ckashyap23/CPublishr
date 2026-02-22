@@ -2,13 +2,33 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_current_user_id, get_db
-from src.contracts.prd import ProjectEntity, TopicInitializationRequest, TopicInitializationResponse
+from src.contracts.prd import ProjectEntity, ProjectListResponse, TopicInitializationRequest, TopicInitializationResponse
 from src.db.repositories.project_repository import ProjectRepository
 from src.services.orchestration.contracts import NodeExecutionContext
 from src.services.orchestration.engine import OrchestrationEngine
 from src.utils.time import to_utc_iso
 
 router = APIRouter()
+
+
+@router.get("/", response_model=ProjectListResponse)
+def list_projects(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> ProjectListResponse:
+    rows = ProjectRepository(db, user_id=user_id).list_projects()
+    return ProjectListResponse(
+        projects=[
+            ProjectEntity(
+                project_id=row.project_id,
+                status=row.status,
+                final_version_number=row.final_version_number,
+                finalized_at=to_utc_iso(row.finalized_at) if row.finalized_at else None,
+                created_at=to_utc_iso(row.created_at),
+            )
+            for row in rows
+        ]
+    )
 
 
 @router.post("/", response_model=TopicInitializationResponse)
