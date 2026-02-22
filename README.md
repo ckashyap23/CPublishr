@@ -1,6 +1,6 @@
 # CPublishr
 
-MVP for multi-node content orchestration with mandatory editorial finalization before artifacts/adapter outputs are used downstream.
+Backend + React UI for user-scoped content workflows, artifacts, and voice-profile generation.
 
 ## Project Layout
 
@@ -13,47 +13,48 @@ MVP for multi-node content orchestration with mandatory editorial finalization b
 
 ## Current Flow
 
-1. Initialize topic context: `POST /api/v1/projects/`
-2. Run Node 0-2:
-   - compact path: `POST /api/v1/workflows/runs` -> returns `awaiting_editorial`
-   - node-by-node path (used by current React audit UI):
-     - `POST /api/v1/workflows/nodes/research`
-     - `POST /api/v1/workflows/nodes/master`
-3. Editorial workspace:
-   - select any version
-   - edit inline and save as a named draft
-   - iterate via feedback preview, then save as named draft
-   - finalize selected version directly (without editing) or finalize after save
-   - patch keywords on existing version in-place
-4. Finalize selected content version.
-5. Artifact generator page:
-   - choose formats by kind
-   - generate selected artifacts
-   - view stored artifacts
+Authentication (required first):
+- `POST /api/v1/auth/signup` with `user_id`, `email`, `password`
+- `POST /api/v1/auth/login` with `user_id`, `password`
+- Use `Authorization: Bearer <token>` for all protected endpoints
+- `GET /api/v1/auth/me` to fetch current user
 
-## Node 0 Input Contract
+Projects / workflow / artifacts (user-scoped):
+- `GET /api/v1/projects/` (list projects for current user)
+- `POST /api/v1/projects/` (initialize/reset Node 0 topic context)
+- `GET /api/v1/projects/{project_id}`
+- `GET /api/v1/versions/{project_id}`
+- `POST /api/v1/artifacts/generate`
+- `GET /api/v1/artifacts/{project_id}`
 
-Required:
-- `project_id`
-- `topic_title`
-- `core_idea`
-- `tone_preference`
-- `voice_profile_id`
-- `target_audience.primary_segment`
+Voice profile module (user-scoped):
+- `POST /api/v1/voice-profiles/collections`
+- `GET /api/v1/voice-profiles/collections`
+- `GET /api/v1/voice-profiles/collections/{voice_profile_id}`
+- `POST /api/v1/voice-profiles/collections/{voice_profile_id}/versions/generate`
+- `GET /api/v1/voice-profiles/versions/{voice_profile_version_id}`
+- `POST /api/v1/voice-profiles/versions/{voice_profile_version_id}/activate`
+- `POST /api/v1/voice-profiles/versions/{voice_profile_version_id}/status`
 
-Optional:
-- `user_content`
-- `target_audience.notes`
-- `audience_familiarity` (`new | somewhat_familiar | very_familiar`)
-- `detail_level` (`quick_take | practical | deep_dive`)
-- `stance` (`neutral | supportive | contrarian | balanced`, default `balanced`)
-- `primary_goal` (`educate | thought_leadership | promote | entertain | recruit | community | convert`)
-- `desired_action` (`comment | share | follow | click | dm | subscribe | buy`)
-- `constraints` (JSON object)
-- `distribution_targets`
+Workflow/editorial/artifacts routes are active in the current UI-backed build.
+
+## Fresh DB Behavior
+
+If DB tables are cleared and backend starts with auto-create enabled:
+- Startup recreates target tables.
+- No users exist initially.
+- First successful signup inserts one row into `users`.
+- Voice profile collections/versions are user-owned and created only via voice-profile APIs.
 
 ## References
 
 - `docs/solution_understanding.md`
 - `docs/teamwork/Generate_Artifacts.md`
 - `ui/react/README.md`
+
+## DB Migrations (Alembic)
+
+From `backend/`:
+
+- `.\.venv\Scripts\alembic.exe upgrade head`
+- `.\.venv\Scripts\alembic.exe revision -m "your_change_name"`

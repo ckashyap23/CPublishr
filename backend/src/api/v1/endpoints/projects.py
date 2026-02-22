@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from src.api.dependencies import get_db
-from src.contracts.prd import ProjectEntity, TopicInitializationRequest, TopicInitializationResponse
+from src.api.dependencies import get_current_user_id, get_db
+from src.contracts.prd import ProjectEntity, ProjectListResponse, TopicInitializationRequest, TopicInitializationResponse
 from src.db.repositories.project_repository import ProjectRepository
 from src.services.orchestration.contracts import NodeExecutionContext
 from src.services.orchestration.engine import OrchestrationEngine
@@ -11,9 +11,33 @@ from src.utils.time import to_utc_iso
 router = APIRouter()
 
 
+@router.get("/", response_model=ProjectListResponse)
+def list_projects(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> ProjectListResponse:
+    rows = ProjectRepository(db, user_id=user_id).list_projects()
+    return ProjectListResponse(
+        projects=[
+            ProjectEntity(
+                project_id=row.project_id,
+                status=row.status,
+                final_version_number=row.final_version_number,
+                finalized_at=to_utc_iso(row.finalized_at) if row.finalized_at else None,
+                created_at=to_utc_iso(row.created_at),
+            )
+            for row in rows
+        ]
+    )
+
+
 @router.post("/", response_model=TopicInitializationResponse)
-def initialize_topic(payload: TopicInitializationRequest, db: Session = Depends(get_db)) -> TopicInitializationResponse:
-    engine = OrchestrationEngine(db)
+def initialize_topic(
+    payload: TopicInitializationRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> TopicInitializationResponse:
+    engine = OrchestrationEngine(db, user_id=user_id)
     # Node 0 marks a fresh run boundary; clear prior project-scoped data first.
     engine.projects.reset_project_data(payload.project_id)
     engine.projects.get_or_create(payload.project_id)
@@ -25,8 +49,12 @@ def initialize_topic(payload: TopicInitializationRequest, db: Session = Depends(
 
 
 @router.get("/{project_id}", response_model=ProjectEntity)
-def get_project(project_id: str, db: Session = Depends(get_db)) -> ProjectEntity:
-    project = ProjectRepository(db).get(project_id)
+def get_project(
+    project_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> ProjectEntity:
+    project = ProjectRepository(db, user_id=user_id).get(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     return ProjectEntity(

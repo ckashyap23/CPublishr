@@ -8,11 +8,11 @@ from src.utils.ids import new_id
 
 
 class PublishingService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, user_id: str):
         self.db = db
-        self.projects = ProjectRepository(db)
-        self.content = ContentRepository(db)
-        self.publish = PublishRepository(db)
+        self.projects = ProjectRepository(db, user_id=user_id)
+        self.content = ContentRepository(db, user_id=user_id)
+        self.publish = PublishRepository(db, user_id=user_id)
 
     def create_job(self, payload: DistributionRequest) -> DistributionResponse:
         DistributionRequest.model_validate(payload)

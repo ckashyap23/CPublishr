@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
+import time
+from pathlib import Path
 from typing import Any
 
 from src.core.config import settings
 from src.services.llm.azure_openai import AzureOpenAIClient, parse_json_object
 from src.services.orchestration.artifact_schema import default_payload_template
 from src.services.orchestration.artifacts.contracts import ArtifactDraft, PipelineContext
+
+TEXT_DIR = Path(__file__).resolve().parent / "text"
+logger = logging.getLogger(__name__)
 
 
 TEXT_FORMATS = {
@@ -17,6 +24,29 @@ TEXT_FORMATS = {
     "script_short",  # script
     "cta_variants",  # cta
 }
+
+
+def _save_text_to_disk(
+    text_data: str,
+    *,
+    ext: str = "txt",
+    project_id: str = "",
+    topic_title: str = "",
+    fmt: str = "",
+) -> Path | None:
+    """Save text output to backend/.../artifacts/formats/text/. Returns path or None."""
+    try:
+        TEXT_DIR.mkdir(parents=True, exist_ok=True)
+        seed = f"{topic_title or project_id or 'text'}_{fmt or 'artifact'}"
+        slug = re.sub(r"[^\w\-]", "_", seed[:80]).strip("_") or "text_artifact"
+        file_ext = (ext or "txt").strip().lower()
+        filename = f"{slug}_{int(time.time() * 1000)}.{file_ext}"
+        path = TEXT_DIR / filename
+        path.write_text(text_data or "", encoding="utf-8")
+        return path
+    except Exception as e:
+        logger.warning("Failed to save text artifact to disk: %s", e)
+        return None
 
 
 class TextArtifactsBuilder:
@@ -118,7 +148,15 @@ Envelope:
 }}
 """.strip()
         raw = self.llm.chat(system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.2, max_tokens=1800)
-        return parse_json_object(raw) or {}
+        parsed = parse_json_object(raw) or {}
+        if not parsed:
+            logger.warning(
+                "TextArtifactsBuilder LLM returned unparseable JSON: fmt=%s chars=%s preview=%r",
+                fmt,
+                len(raw or ""),
+                (raw or "")[:240],
+            )
+        return parsed
 
     def _merge_payload(self, *, payload: dict[str, Any] | None, fmt: str, ctx: PipelineContext) -> dict[str, Any]:
         merged = default_payload_template()
@@ -156,20 +194,70 @@ Envelope:
             out.append(s)
         return out
 
+    @staticmethod
+    def _text_output_for_disk(*, fmt: str, payload: dict[str, Any]) -> tuple[str, str]:
+        if fmt in {"caption", "x_post", "blog_long", "newsletter"}:
+            body = payload.get("body")
+            return (str(body) if body is not None else "", "txt")
+        return (json.dumps(payload, ensure_ascii=False, indent=2), "json")
+
+    @staticmethod
+    def _local_text_asset(*, path: Path, ext: str, fmt: str) -> dict[str, Any]:
+        normalized_ext = (ext or "txt").lower()
+        mime_type = "application/json" if normalized_ext == "json" else "text/plain"
+        return {
+            "asset_type": "text_file",
+            "format": normalized_ext,
+            "mime_type": mime_type,
+            "uri": path.as_uri(),
+            "path": str(path),
+            "source": "local_disk",
+            "artifact_format": fmt,
+        }
+
     def build(self, *, fmt: str, ctx: PipelineContext) -> ArtifactDraft:
         if fmt not in self.formats:
             raise ValueError(f"Unsupported text format for text builder: {fmt}")
         llm_out: dict[str, Any] = {}
+        llm_attempted = bool(self.enable_llm and self.llm and self.llm.enabled)
         try:
             llm_out = self._generate_with_llm(fmt=fmt, ctx=ctx)
         except Exception:
             llm_out = {}
         payload = llm_out.get("payload_json") if isinstance(llm_out, dict) else None
-        merged = self._merge_payload(payload=payload, fmt=fmt, ctx=ctx) if isinstance(payload, dict) else self._fallback_payload(fmt=fmt, ctx=ctx)
+        used_llm_payload = isinstance(payload, dict)
+        merged = (
+            self._merge_payload(payload=payload, fmt=fmt, ctx=ctx)
+            if used_llm_payload
+            else self._fallback_payload(fmt=fmt, ctx=ctx)
+        )
+        if isinstance(merged.get("settings"), dict):
+            merged["settings"]["generation_source"] = "llm" if used_llm_payload else "fallback"
+            merged["settings"]["llm_attempted"] = llm_attempted
+        logger.info(
+            "TextArtifactsBuilder complete: fmt=%s source=%s llm_attempted=%s",
+            fmt,
+            "llm" if used_llm_payload else "fallback",
+            llm_attempted,
+        )
         title = str((llm_out.get("title") if isinstance(llm_out, dict) else "") or "").strip()
         if not title:
             title = f"{ctx.topic_title} - {fmt.replace('_', ' ').title()}"
         tags = self._normalize_tags(llm_out.get("tags_json") if isinstance(llm_out, dict) else None, list(ctx.seed_keywords))
+        text_out, ext = self._text_output_for_disk(fmt=fmt, payload=merged)
+        saved_path = _save_text_to_disk(
+            text_out,
+            ext=ext,
+            project_id=ctx.project_id,
+            topic_title=ctx.topic_title,
+            fmt=fmt,
+        )
+        if isinstance(merged.get("settings"), dict) and saved_path is not None:
+            merged["settings"]["local_output_path"] = str(saved_path)
+        if saved_path is not None:
+            if not isinstance(merged.get("assets"), list):
+                merged["assets"] = []
+            merged["assets"].append(self._local_text_asset(path=saved_path, ext=ext, fmt=fmt))
         return ArtifactDraft(format=fmt, title=title, payload_json=merged, tags_json=tags)
 
 

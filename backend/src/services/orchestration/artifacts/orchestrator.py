@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -17,11 +17,12 @@ from src.utils.ids import new_id
 class ArtifactPipelineOrchestrator:
     """Per-format artifact generation pipeline (no stage fan-out)."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, user_id: str):
         self.db = db
-        self.projects = ProjectRepository(db)
-        self.contents = ContentRepository(db)
-        self.artifacts = ArtifactRepository(db)
+        self.user_id = user_id
+        self.projects = ProjectRepository(db, user_id=user_id)
+        self.contents = ContentRepository(db, user_id=user_id)
+        self.artifacts = ArtifactRepository(db, user_id=user_id)
 
     @staticmethod
     def _merge_tags(seed_keywords: list[str], payload: dict[str, Any], existing: list[str] | None = None) -> list[str]:
@@ -32,6 +33,22 @@ class ArtifactPipelineOrchestrator:
                 if s and s not in acc:
                     acc.append(s)
         return acc
+
+    @staticmethod
+    def _style_settings_for_format(
+        fmt: str,
+        *,
+        shared: dict[str, Any] | None = None,
+        by_format: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        merged: dict[str, Any] = {}
+        if isinstance(shared, dict):
+            merged.update(shared)
+        if isinstance(by_format, dict):
+            fmt_settings = by_format.get(fmt)
+            if isinstance(fmt_settings, dict):
+                merged.update(fmt_settings)
+        return merged
 
     def _build_context(
         self,
@@ -54,6 +71,7 @@ class ArtifactPipelineOrchestrator:
         normalized_formats = [f for f in requested_formats if f in supported]
 
         return PipelineContext(
+            user_id=self.user_id,
             project_id=project_id,
             context_bundle=bundle,
             topic_title=topic_title,
@@ -118,6 +136,7 @@ class ArtifactPipelineOrchestrator:
         requested_formats: list[str],
         options: GenerationOptions | None = None,
         style_settings: dict[str, Any] | None = None,
+        style_settings_by_format: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         opts = options or GenerationOptions()
         self.projects.get_or_create(project_id)
@@ -131,7 +150,15 @@ class ArtifactPipelineOrchestrator:
             builder = resolve_builder(fmt)
             if builder is None:
                 raise ValueError(f"No format builder registered for: {fmt}")
-            draft = builder.build(fmt=fmt, ctx=ctx)
+            fmt_ctx = replace(
+                ctx,
+                style_settings=self._style_settings_for_format(
+                    fmt,
+                    shared=style_settings,
+                    by_format=style_settings_by_format,
+                ),
+            )
+            draft = builder.build(fmt=fmt, ctx=fmt_ctx)
             persisted.append(self._persist_draft(project_id=project_id, draft=draft, revision_mode=opts.revision_mode))
 
         return {

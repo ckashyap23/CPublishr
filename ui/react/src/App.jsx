@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const API_BASE_DEFAULT = "http://127.0.0.1:8010";
 
@@ -56,16 +56,18 @@ function LabelWithTooltip({ text, tooltip }) {
       <label>{text}</label>
       {tooltip ? (
         <span className="tooltip-icon" title={tooltip} aria-label={tooltip} tabIndex={0} role="note">
-          ⓘ
+          ?
         </span>
       ) : null}
     </div>
   );
 }
-async function apiRequest(baseUrl, method, path, body) {
+async function apiRequest(baseUrl, method, path, body, token = "") {
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(`${baseUrl}${path}`, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   const txt = await res.text();
@@ -91,6 +93,10 @@ function getVersionLabel(v) {
 
 export default function App() {
   const [apiBaseUrl, setApiBaseUrl] = useState(API_BASE_DEFAULT);
+  const [authToken, setAuthToken] = useState(() => window.localStorage.getItem("cpublishr_token") || "");
+  const [authMode, setAuthMode] = useState("login");
+  const [authForm, setAuthForm] = useState({ user_id: "", email: "", password: "" });
+  const [currentUser, setCurrentUser] = useState(null);
   const [page, setPage] = useState("setup");
   const [busy, setBusy] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -138,6 +144,27 @@ export default function App() {
   const [selectedStoredArtifactTab, setSelectedStoredArtifactTab] = useState(0);
   const [isArtifactGenerating, setIsArtifactGenerating] = useState(false);
   const [isStoredArtifactsLoading, setIsStoredArtifactsLoading] = useState(false);
+  const [hasStoredArtifactsForProject, setHasStoredArtifactsForProject] = useState(false);
+  const [isCheckingStoredArtifacts, setIsCheckingStoredArtifacts] = useState(false);
+  const [artifactsViewMode, setArtifactsViewMode] = useState("generate");
+
+  const [vpCollections, setVpCollections] = useState([]);
+  const [vpSelectedCollectionId, setVpSelectedCollectionId] = useState("");
+  const [vpCollectionDetail, setVpCollectionDetail] = useState(null);
+  const [vpSelectedVersionId, setVpSelectedVersionId] = useState("");
+  const [vpVersionDetail, setVpVersionDetail] = useState(null);
+  const [vpCreateForm, setVpCreateForm] = useState({ voice_profile_name: "", platforms: ["linkedin"] });
+  const [vpGenerateForm, setVpGenerateForm] = useState({
+    intended_use: "",
+    datasets: [{ dataset_name: "", source_profile: "", blob_prefix: "", sample_scope_note: "" }],
+  });
+  const [vpStatusInput, setVpStatusInput] = useState("approved");
+  const [isVpGenerating, setIsVpGenerating] = useState(false);
+  const [userProjects, setUserProjects] = useState([]);
+  const [isProjectsLoading, setIsProjectsLoading] = useState(false);
+  const contentCheckSeqRef = useRef(0);
+  const storedArtifactsCheckSeqRef = useRef(0);
+  const isAuthenticated = !!authToken;
 
   const selectedVersion = useMemo(
     () => versions.find((v) => v.version_number === selectedVersionNumber) || null,
@@ -187,9 +214,22 @@ export default function App() {
     return storedArtifacts.filter((a) => a?.format === selectedStoredFormat);
   }, [storedArtifacts, selectedStoredFormat]);
   const selectedStoredArtifact = filteredStoredArtifacts[selectedStoredArtifactTab] || null;
+  const approvedActiveVoiceProfileOptions = useMemo(() => {
+    return vpCollections
+      .filter((c) => c?.active_version && String(c.active_version.generation_status || "").toLowerCase() === "approved")
+      .map((c) => {
+        const active = c.active_version || {};
+        const versionNo = active.version_no ?? "-";
+        const name = String(c.voice_profile_name || c.voice_profile_id || "").trim();
+        return {
+          value: c.voice_profile_id,
+          label: `${name} (active v${versionNo})`,
+        };
+      });
+  }, [vpCollections]);
 
   async function refreshVersions(projectId, preferredVersion) {
-    const data = await apiRequest(apiBaseUrl, "GET", `/api/v1/versions/${projectId}`);
+    const data = await request("GET", `/api/v1/versions/${projectId}`);
     const list = data?.versions || [];
     setVersions(list);
     if (preferredVersion && list.some((v) => v.version_number === preferredVersion)) {
@@ -201,22 +241,295 @@ export default function App() {
     setSelectedVersionNumber(fallback ? fallback.version_number : null);
   }
 
+  function persistAuthToken(token) {
+    const next = token || "";
+    setAuthToken(next);
+    if (next) window.localStorage.setItem("cpublishr_token", next);
+    else window.localStorage.removeItem("cpublishr_token");
+  }
+
+  async function request(method, path, body) {
+    return apiRequest(apiBaseUrl, method, path, body, authToken);
+  }
+
+  async function loadCurrentUser() {
+    if (!authToken) {
+      setCurrentUser(null);
+      return;
+    }
+    try {
+      const me = await request("GET", "/api/v1/auth/me");
+      setCurrentUser(me || null);
+    } catch {
+      persistAuthToken("");
+      setCurrentUser(null);
+    }
+  }
+
+  async function loadUserProjects() {
+    if (!authToken) {
+      setUserProjects([]);
+      return;
+    }
+    setIsProjectsLoading(true);
+    try {
+      const out = await request("GET", "/api/v1/projects/");
+      const rows = Array.isArray(out?.projects) ? out.projects : [];
+      setUserProjects(rows);
+      const currentProjectId = String(form.project_id || "").trim();
+      const hasCurrent = currentProjectId && rows.some((p) => p?.project_id === currentProjectId);
+      if (!currentProjectId && rows[0]?.project_id) {
+        setForm((prev) => ({ ...prev, project_id: rows[0].project_id }));
+      } else if (!hasCurrent && rows[0]?.project_id) {
+        setForm((prev) => ({ ...prev, project_id: rows[0].project_id }));
+      }
+    } catch {
+      setUserProjects([]);
+    } finally {
+      setIsProjectsLoading(false);
+    }
+  }
+
+  async function onAuthSubmit() {
+    setError("");
+    setMessage("");
+    setBusy(true);
+    try {
+      if (!authForm.password) {
+        throw new Error("Password is required.");
+      }
+      if (!authForm.user_id.trim()) {
+        throw new Error("User ID is required.");
+      }
+      if (authMode === "signup" && !authForm.email.trim()) {
+        throw new Error("Email is required for signup.");
+      }
+      const path = authMode === "signup" ? "/api/v1/auth/signup" : "/api/v1/auth/login";
+      const payload = authMode === "signup"
+        ? { user_id: authForm.user_id.trim(), email: authForm.email.trim(), password: authForm.password }
+        : { user_id: authForm.user_id.trim(), password: authForm.password };
+      const out = await apiRequest(apiBaseUrl, "POST", path, payload, "");
+      persistAuthToken(out?.access_token || "");
+      setCurrentUser(out?.user || null);
+      setAuthForm((prev) => ({ ...prev, password: "" }));
+      setMessage("");
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function onLogout() {
+    persistAuthToken("");
+    setCurrentUser(null);
+    setUserProjects([]);
+    setPage("setup");
+    setVpCollections([]);
+    setVpSelectedCollectionId("");
+    setVpCollectionDetail(null);
+    setVpSelectedVersionId("");
+    setVpVersionDetail(null);
+    setMessage("Logged out.");
+  }
+
+  async function vpRequest(method, path, body) {
+    return apiRequest(apiBaseUrl, method, path, body, authToken);
+  }
+
+  async function loadVpCollections(preferredCollectionId = "") {
+    if (!authToken) {
+      setVpCollections([]);
+      setVpSelectedCollectionId("");
+      setVpCollectionDetail(null);
+      setVpSelectedVersionId("");
+      setVpVersionDetail(null);
+      return;
+    }
+    const out = await vpRequest("GET", "/api/v1/voice-profiles/collections");
+    const rows = Array.isArray(out?.collections) ? out.collections : [];
+    setVpCollections(rows);
+    const hasPreferred = preferredCollectionId && rows.some((x) => x.voice_profile_id === preferredCollectionId);
+    const nextCollectionId = hasPreferred ? preferredCollectionId : rows[0]?.voice_profile_id || "";
+    setVpSelectedCollectionId(nextCollectionId);
+
+    const activeApproved = rows.find(
+      (x) => x?.active_version && String(x.active_version.generation_status || "").toLowerCase() === "approved"
+    );
+    if (activeApproved) {
+      setForm((prev) => ({ ...prev, voice_profile_id: activeApproved.voice_profile_id }));
+    }
+  }
+
+  async function loadVpCollectionDetail(voiceProfileId) {
+    if (!voiceProfileId || !authToken) {
+      setVpCollectionDetail(null);
+      setVpSelectedVersionId("");
+      setVpVersionDetail(null);
+      return;
+    }
+    const out = await vpRequest("GET", `/api/v1/voice-profiles/collections/${voiceProfileId}`);
+    setVpCollectionDetail(out || null);
+    const versions = Array.isArray(out?.versions) ? out.versions : [];
+    const active = versions.find((v) => v.is_active);
+    setVpSelectedVersionId(active?.voice_profile_version_id || versions[0]?.voice_profile_version_id || "");
+  }
+
+  async function loadVpVersionDetail(voiceProfileVersionId) {
+    if (!voiceProfileVersionId || !authToken) {
+      setVpVersionDetail(null);
+      return;
+    }
+    const out = await vpRequest("GET", `/api/v1/voice-profiles/versions/${voiceProfileVersionId}`);
+    setVpVersionDetail(out || null);
+  }
+
+  function toggleVpPlatform(platform) {
+    const curr = new Set(vpCreateForm.platforms || []);
+    if (curr.has(platform)) curr.delete(platform);
+    else curr.add(platform);
+    setVpCreateForm((prev) => ({ ...prev, platforms: Array.from(curr) }));
+  }
+
+  async function onVpCreateCollection() {
+    setError("");
+    setMessage("");
+    setBusy(true);
+    try {
+      const payload = {
+        voice_profile_name: (vpCreateForm.voice_profile_name || "").trim(),
+        platforms: vpCreateForm.platforms || [],
+      };
+      const out = await vpRequest("POST", "/api/v1/voice-profiles/collections", payload);
+      const newId = out?.collection?.voice_profile_id || "";
+      setVpCreateForm({ voice_profile_name: "", platforms: ["linkedin"] });
+      await loadVpCollections(newId);
+      setMessage("Voice profile collection created.");
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function updateVpDatasetRow(index, field, value) {
+    setVpGenerateForm((prev) => {
+      const rows = [...prev.datasets];
+      rows[index] = { ...rows[index], [field]: value };
+      return { ...prev, datasets: rows };
+    });
+  }
+
+  function addVpDatasetRow() {
+    setVpGenerateForm((prev) => ({
+      ...prev,
+      datasets: [...prev.datasets, { dataset_name: "", source_profile: "", blob_prefix: "", sample_scope_note: "" }],
+    }));
+  }
+
+  function removeVpDatasetRow(index) {
+    setVpGenerateForm((prev) => {
+      if (prev.datasets.length <= 1) return prev;
+      return { ...prev, datasets: prev.datasets.filter((_, i) => i !== index) };
+    });
+  }
+
+  async function onVpGenerateVersion() {
+    if (!vpSelectedCollectionId) {
+      setError("Select a voice profile collection first.");
+      return;
+    }
+    setError("");
+    setMessage("");
+    setBusy(true);
+    setIsVpGenerating(true);
+    try {
+      const payload = {
+        intended_use: (vpGenerateForm.intended_use || "").trim() || null,
+        datasets: vpGenerateForm.datasets.map((d) => ({
+          dataset_name: (d.dataset_name || "").trim(),
+          source_profile: (d.source_profile || "").trim() || null,
+          blob_prefix: (d.blob_prefix || "").trim(),
+          sample_scope_note: (d.sample_scope_note || "").trim() || null,
+        })),
+      };
+      const out = await vpRequest(
+        "POST",
+        `/api/v1/voice-profiles/collections/${vpSelectedCollectionId}/versions/generate`,
+        payload
+      );
+      const newVersionId = out?.generated_version?.version?.voice_profile_version_id || "";
+      await loadVpCollections(vpSelectedCollectionId);
+      await loadVpCollectionDetail(vpSelectedCollectionId);
+      if (newVersionId) setVpSelectedVersionId(newVersionId);
+      setMessage(`Voice profile version generated. Dataset entries written: ${out?.dataset_entries_written ?? 0}.`);
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+      setIsVpGenerating(false);
+    }
+  }
+
+  async function onVpActivateVersion() {
+    if (!vpSelectedVersionId) return;
+    setError("");
+    setMessage("");
+    setBusy(true);
+    try {
+      await vpRequest("POST", `/api/v1/voice-profiles/versions/${vpSelectedVersionId}/activate`, {});
+      await loadVpCollections(vpSelectedCollectionId);
+      await loadVpCollectionDetail(vpSelectedCollectionId);
+      await loadVpVersionDetail(vpSelectedVersionId);
+      setMessage("Voice profile version activated.");
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onVpUpdateStatus() {
+    if (!vpSelectedVersionId) return;
+    setError("");
+    setMessage("");
+    setBusy(true);
+    try {
+      await vpRequest("POST", `/api/v1/voice-profiles/versions/${vpSelectedVersionId}/status`, {
+        status: (vpStatusInput || "").trim(),
+      });
+      await loadVpCollections(vpSelectedCollectionId);
+      await loadVpCollectionDetail(vpSelectedCollectionId);
+      await loadVpVersionDetail(vpSelectedVersionId);
+      setMessage("Voice profile version status updated.");
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function checkExistingContent(projectId) {
-    if (!(projectId || "").trim()) {
+    const normalizedProjectId = (projectId || "").trim();
+    const requestSeq = ++contentCheckSeqRef.current;
+    if (!normalizedProjectId) {
       setHasExistingContent(false);
       return;
     }
     setIsCheckingProjectData(true);
     try {
-      const data = await apiRequest(apiBaseUrl, "GET", `/api/v1/versions/${projectId}`);
+      const data = await request("GET", `/api/v1/versions/${normalizedProjectId}`);
+      if (requestSeq !== contentCheckSeqRef.current) return;
       const list = data?.versions || [];
       const exists = Array.isArray(list) && list.length > 0;
       setHasExistingContent(exists);
       setShowGenerateSetupForm(!exists);
     } catch {
+      if (requestSeq !== contentCheckSeqRef.current) return;
       setHasExistingContent(false);
       setShowGenerateSetupForm(true);
     } finally {
+      if (requestSeq !== contentCheckSeqRef.current) return;
       setIsCheckingProjectData(false);
     }
   }
@@ -304,7 +617,7 @@ export default function App() {
     try {
       const topicPayload = buildTopicPayload();
       setNodeAudit((prev) => [...prev, { node: "Node 0 - Topic Initialization", status: "running", output: null }]);
-      const node0 = await apiRequest(apiBaseUrl, "POST", "/api/v1/projects/", topicPayload);
+      const node0 = await request("POST", "/api/v1/projects/", topicPayload);
       setNodeAudit((prev) => {
         const next = [...prev];
         next[next.length - 1] = { node: "Node 0 - Topic Initialization", status: "completed", output: node0 };
@@ -312,7 +625,7 @@ export default function App() {
       });
 
       setNodeAudit((prev) => [...prev, { node: "Node 1 - Research Trends", status: "running", output: null }]);
-      const node1 = await apiRequest(apiBaseUrl, "POST", "/api/v1/workflows/nodes/research", {
+      const node1 = await request("POST", "/api/v1/workflows/nodes/research", {
         topic: topicPayload,
         persist_context: false,
       });
@@ -323,7 +636,7 @@ export default function App() {
       });
 
       setNodeAudit((prev) => [...prev, { node: "Node 2 - Master Content", status: "running", output: null }]);
-      const node2 = await apiRequest(apiBaseUrl, "POST", "/api/v1/workflows/nodes/master", {
+      const node2 = await request("POST", "/api/v1/workflows/nodes/master", {
         topic: topicPayload,
         research: node1,
         persist_context: false,
@@ -336,6 +649,7 @@ export default function App() {
       });
 
       await refreshVersions(form.project_id);
+      loadUserProjects().catch(() => {});
       setMessage("Node 0-2 completed. Review audit output below, then continue to editorial.");
       setCanContinueToEditorial(true);
     } catch (e) {
@@ -380,8 +694,7 @@ export default function App() {
     setError("");
     setBusy(true);
     try {
-      await apiRequest(
-        apiBaseUrl,
+      await request(
         "PATCH",
         `/api/v1/versions/${form.project_id}/${selectedVersion.version_number}/keywords`,
         { keywords: nextKeywords }
@@ -420,7 +733,7 @@ export default function App() {
     setError("");
     setBusy(true);
     try {
-      const out = await apiRequest(apiBaseUrl, "POST", "/api/v1/workflows/nodes/editorial/save-inline", {
+      const out = await request("POST", "/api/v1/workflows/nodes/editorial/save-inline", {
         project_id: form.project_id,
         source_version: selectedVersion.version_number,
         content: content.trim(),
@@ -459,7 +772,7 @@ export default function App() {
     setIsPreviewing(true);
     setBusy(true);
     try {
-      const out = await apiRequest(apiBaseUrl, "POST", "/api/v1/workflows/nodes/editorial/feedback/preview", {
+      const out = await request("POST", "/api/v1/workflows/nodes/editorial/feedback/preview", {
         project_id: form.project_id,
         source_version: selectedVersion.version_number,
         user_feedback: feedbackText,
@@ -482,7 +795,7 @@ export default function App() {
     setPage("artifacts");
     setBusy(true);
     try {
-      await apiRequest(apiBaseUrl, "POST", "/api/v1/workflows/nodes/editorial/finalize-selected", {
+      await request("POST", "/api/v1/workflows/nodes/editorial/finalize-selected", {
         project_id: form.project_id,
         selected_version: selectedVersion.version_number,
       });
@@ -510,7 +823,7 @@ export default function App() {
     setPage("artifacts");
     setBusy(true);
     try {
-      await apiRequest(apiBaseUrl, "POST", "/api/v1/workflows/nodes/editorial/finalize-selected", {
+      await request("POST", "/api/v1/workflows/nodes/editorial/finalize-selected", {
         project_id: form.project_id,
         selected_version: saved.draft_version,
       });
@@ -548,7 +861,7 @@ export default function App() {
     setPage("artifacts");
     setBusy(true);
     try {
-      await apiRequest(apiBaseUrl, "POST", "/api/v1/workflows/nodes/editorial/finalize-selected", {
+      await request("POST", "/api/v1/workflows/nodes/editorial/finalize-selected", {
         project_id: form.project_id,
         selected_version: saved.draft_version,
       });
@@ -572,18 +885,31 @@ export default function App() {
     setMessage("");
     setBusy(true);
     setIsArtifactGenerating(true);
+    setArtifactsViewMode("generate");
     setArtifactOutput(null);
     setSelectedArtifactTab(0);
     try {
-      const out = await apiRequest(apiBaseUrl, "POST", "/api/v1/artifacts/generate", {
+      const includesImageGeneration = selectedArtifactFormats.includes("image_generation");
+      const imageStyleSettings = includesImageGeneration
+        ? {
+            tool_name: "openai",
+            output_formats: ["png"],
+            size: "1024x1024",
+            quality: "standard",
+            style: "vivid",
+          }
+        : null;
+      const out = await request("POST", "/api/v1/artifacts/generate", {
         project_id: form.project_id,
         requested_formats: selectedArtifactFormats,
         revision_mode: "new_revision",
         style_settings: {},
+        style_settings_by_format: imageStyleSettings ? { image_generation: imageStyleSettings } : {},
       });
       setArtifactOutput(out);
       setSelectedArtifactTab(0);
       const count = Array.isArray(out?.artifacts) ? out.artifacts.length : 0;
+      setHasStoredArtifactsForProject(count > 0 || hasStoredArtifactsForProject);
       setMessage(`Generated ${count} artifact(s).`);
     } catch (e) {
       setError(e.message || String(e));
@@ -598,20 +924,46 @@ export default function App() {
     setMessage("");
     setBusy(true);
     setIsStoredArtifactsLoading(true);
+    setArtifactsViewMode("stored");
     try {
-      const out = await apiRequest(apiBaseUrl, "GET", `/api/v1/artifacts/${form.project_id}`);
+      const out = await request("GET", `/api/v1/artifacts/${form.project_id}`);
       const items = Array.isArray(out?.artifacts) ? out.artifacts : [];
       setStoredArtifacts(items);
       const formats = Array.from(new Set(items.map((a) => (a?.format || "").trim()).filter(Boolean))).sort();
       setSelectedStoredFormat(formats[0] || "");
       setSelectedStoredArtifactTab(0);
       const count = Array.isArray(out?.artifacts) ? out.artifacts.length : 0;
+      setHasStoredArtifactsForProject(count > 0);
       setMessage(`Loaded ${count} stored artifact(s).`);
     } catch (e) {
+      setHasStoredArtifactsForProject(false);
       setError(e.message || String(e));
     } finally {
       setBusy(false);
       setIsStoredArtifactsLoading(false);
+    }
+  }
+
+  async function checkStoredArtifactsAvailability(projectId) {
+    const normalizedProjectId = (projectId || "").trim();
+    const requestSeq = ++storedArtifactsCheckSeqRef.current;
+    if (!authToken || !normalizedProjectId) {
+      setHasStoredArtifactsForProject(false);
+      setIsCheckingStoredArtifacts(false);
+      return;
+    }
+    setIsCheckingStoredArtifacts(true);
+    try {
+      const out = await request("GET", `/api/v1/artifacts/${normalizedProjectId}`);
+      if (requestSeq !== storedArtifactsCheckSeqRef.current) return;
+      const items = Array.isArray(out?.artifacts) ? out.artifacts : [];
+      setHasStoredArtifactsForProject(items.length > 0);
+    } catch {
+      if (requestSeq !== storedArtifactsCheckSeqRef.current) return;
+      setHasStoredArtifactsForProject(false);
+    } finally {
+      if (requestSeq !== storedArtifactsCheckSeqRef.current) return;
+      setIsCheckingStoredArtifacts(false);
     }
   }
 
@@ -622,15 +974,37 @@ export default function App() {
   }, [selectedVersionNumber]);
 
   useEffect(() => {
-    const projectId = (form.project_id || "").trim();
-    checkExistingContent(projectId);
-  }, [form.project_id, apiBaseUrl]);
+    loadCurrentUser().catch(() => {});
+  }, [authToken, apiBaseUrl]);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
+    const projectId = (form.project_id || "").trim();
+    checkExistingContent(projectId);
+  }, [form.project_id, apiBaseUrl, isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setHasStoredArtifactsForProject(false);
+      setIsCheckingStoredArtifacts(false);
+      return;
+    }
+    const projectId = (form.project_id || "").trim();
+    setStoredArtifacts([]);
+    setSelectedStoredFormat("");
+    setSelectedStoredArtifactTab(0);
+    checkStoredArtifactsAvailability(projectId);
+  }, [form.project_id, apiBaseUrl, isAuthenticated, authToken]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setArtifactFormatsByKind({});
+      return;
+    }
     let ignore = false;
     async function loadArtifactFormats() {
       try {
-        const out = await apiRequest(apiBaseUrl, "GET", "/api/v1/artifacts/catalog/formats");
+        const out = await request("GET", "/api/v1/artifacts/catalog/formats");
         const byKind = out?.formats_by_kind && typeof out.formats_by_kind === "object" ? out.formats_by_kind : {};
         if (!ignore) setArtifactFormatsByKind(byKind);
       } catch {
@@ -641,40 +1015,137 @@ export default function App() {
     return () => {
       ignore = true;
     };
-  }, [apiBaseUrl]);
+  }, [apiBaseUrl, isAuthenticated, authToken]);
+
+  useEffect(() => {
+    if (!authToken) return;
+    loadUserProjects().catch(() => {});
+  }, [authToken, apiBaseUrl]);
+
+  useEffect(() => {
+    if (!authToken) {
+      setUserProjects([]);
+      return;
+    }
+    loadVpCollections().catch(() => {});
+  }, [authToken, apiBaseUrl]);
+
+  useEffect(() => {
+    if (!authToken) return;
+    loadVpCollectionDetail(vpSelectedCollectionId).catch(() => {});
+  }, [vpSelectedCollectionId, authToken]);
+
+  useEffect(() => {
+    if (!authToken) return;
+    loadVpVersionDetail(vpSelectedVersionId).catch(() => {});
+  }, [vpSelectedVersionId, authToken]);
+
+  useEffect(() => {
+    if (!approvedActiveVoiceProfileOptions.length) return;
+    const hasCurrent = approvedActiveVoiceProfileOptions.some((x) => x.value === form.voice_profile_id);
+    if (!hasCurrent) {
+      setForm((prev) => ({ ...prev, voice_profile_id: approvedActiveVoiceProfileOptions[0].value }));
+    }
+  }, [approvedActiveVoiceProfileOptions]);
 
   return (
     <div className="container">
       <div className="card">
-        <h1>CPublishr UI</h1>
-        <p className="note">Lightweight React interface for Node 0-3 flow with editorial actions.</p>
-          <div className="grid two">
-            <div>
-              <label>Backend Base URL</label>
-              <input value={apiBaseUrl} onChange={(e) => setApiBaseUrl(e.target.value)} />
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <h1>Publishr</h1>
+          {isAuthenticated ? (
+            <div className="row">
+              <button className="secondary" disabled={busy} onClick={() => setPage("settings")}>Settings</button>
+              <button className="secondary" disabled={busy} onClick={onLogout}>Logout</button>
             </div>
-            <div>
-              <label>Project ID</label>
-              <input value={form.project_id} onChange={(e) => setForm({ ...form, project_id: e.target.value })} />
-              {page === "setup" && hasExistingContent ? (
-                <div className="row" style={{ marginTop: "8px" }}>
-                  <button className="secondary" disabled={busy || isCheckingProjectData} onClick={onRetrieveContent}>
-                    Retrieve Content
-                  </button>
-                  <button
-                    className="primary"
-                    disabled={busy || isCheckingProjectData}
-                    onClick={() => setShowGenerateSetupForm(true)}
-                  >
-                    Generate Content
-                  </button>
+          ) : null}
+        </div>
+        <p className="note">Lightweight React interface for Node 0-3 flow with editorial actions.</p>
+        <div className="grid two">
+          <div>
+            <label>Backend Base URL</label>
+            <input value={apiBaseUrl} onChange={(e) => setApiBaseUrl(e.target.value)} />
+          </div>
+          {!isAuthenticated ? (
+            <>
+              <div>
+                <label>Auth Mode</label>
+                <div className="row">
+                  <button className={authMode === "login" ? "primary" : "secondary"} disabled={busy} onClick={() => setAuthMode("login")}>Login</button>
+                  <button className={authMode === "signup" ? "primary" : "secondary"} disabled={busy} onClick={() => setAuthMode("signup")}>Signup</button>
+                </div>
+              </div>
+              <div>
+                <label>User ID</label>
+                <input value={authForm.user_id} onChange={(e) => setAuthForm({ ...authForm, user_id: e.target.value })} />
+              </div>
+              {authMode === "signup" ? (
+                <div>
+                  <label>Email</label>
+                  <input value={authForm.email} onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })} />
                 </div>
               ) : null}
-              {page === "setup" && isCheckingProjectData ? (
-                <p className="note" style={{ marginTop: "6px" }}>Checking project data...</p>
-              ) : null}
-            </div>
-          </div>
+              <div>
+                <label>Password</label>
+                <input type="password" value={authForm.password} onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })} />
+              </div>
+              <div>
+                <label>Authenticate</label>
+                <button className="primary" disabled={busy} onClick={onAuthSubmit}>
+                  {busy ? "Please wait..." : authMode === "signup" ? "Sign Up" : "Login"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <label>User</label>
+                <p className="note">{currentUser?.user_id || "-"} ({currentUser?.email || "-"})</p>
+              </div>
+              <div>
+                <label>Project ID</label>
+                <input
+                  list="user-project-ids"
+                  value={form.project_id}
+                  onChange={(e) => setForm({ ...form, project_id: e.target.value })}
+                />
+                <datalist id="user-project-ids">
+                  {userProjects.map((p) => (
+                    <option key={p.project_id} value={p.project_id} />
+                  ))}
+                </datalist>
+                {page === "setup" && isProjectsLoading ? (
+                  <p className="note" style={{ marginTop: "6px" }}>Loading your projects...</p>
+                ) : null}
+                {page === "setup" && hasExistingContent ? (
+                  <div className="row" style={{ marginTop: "8px" }}>
+                    <button className="secondary" disabled={busy || isCheckingProjectData} onClick={onRetrieveContent}>
+                      Retrieve Content
+                    </button>
+                    <button
+                      className="primary"
+                      disabled={busy || isCheckingProjectData}
+                      onClick={() => setShowGenerateSetupForm(true)}
+                    >
+                      Generate Content
+                    </button>
+                  </div>
+                ) : null}
+                {page === "setup" && isCheckingProjectData ? (
+                  <p className="note" style={{ marginTop: "6px" }}>Checking project data...</p>
+                ) : null}
+              </div>
+              <div>
+                <label>Workflow Pages</label>
+                <div className="row">
+                  <button className={page === "setup" ? "primary" : "secondary"} disabled={busy} onClick={() => setPage("setup")}>Setup</button>
+                  <button className={page === "editorial" ? "primary" : "secondary"} disabled={busy} onClick={() => setPage("editorial")}>Editorial</button>
+                  <button className={page === "artifacts" ? "primary" : "secondary"} disabled={busy} onClick={() => setPage("artifacts")}>Artifacts</button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
         {message ? <div className="status ok">{message}</div> : null}
         {error ? <div className="status warn">{error}</div> : null}
         {(isGenerating || isArtifactGenerating || isStoredArtifactsLoading) ? (
@@ -694,7 +1165,7 @@ export default function App() {
         ) : null}
       </div>
 
-      {page === "setup" && showGenerateSetupForm && (
+      {isAuthenticated && page === "setup" && showGenerateSetupForm && (
         <div className="card">
           <h2>Generate Content</h2>
           <div className="grid two">
@@ -791,10 +1262,23 @@ export default function App() {
             </div>
             <div>
               <LabelWithTooltip
-                text="Voice Profile ID"
-                tooltip="Required. Placeholder ID for voice profile linkage. Use any stable value for now (e.g., vp_local_1)."
+                text="Voice Profile"
+                tooltip="Select from approved active voice profiles by name. The mapped voice_profile_id is sent to backend."
               />
-              <input value={form.voice_profile_id || ""} onChange={(e) => setForm({ ...form, voice_profile_id: e.target.value })} />
+              <select
+                value={form.voice_profile_id || ""}
+                onChange={(e) => setForm({ ...form, voice_profile_id: e.target.value })}
+              >
+                <option value="">Select approved active voice profile</option>
+                {approvedActiveVoiceProfileOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              {form.voice_profile_id ? (
+                <p className="note" style={{ marginTop: "6px" }}>Selected voice_profile_id: {form.voice_profile_id}</p>
+              ) : (
+                <p className="note" style={{ marginTop: "6px" }}>No approved active voice profile selected.</p>
+              )}
             </div>
             <div>
               <LabelWithTooltip
@@ -865,7 +1349,167 @@ export default function App() {
         </div>
       )}
 
-      {page === "editorial" && (
+      {isAuthenticated && page === "settings" && (
+        <>
+          <div className="card">
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <h2>Voice Profile Settings</h2>
+              <button className="secondary" disabled={busy} onClick={() => setPage("setup")}>Back to Workflow</button>
+            </div>
+            {!authToken ? (
+              <p className="note">Login first to access voice profile APIs.</p>
+            ) : null}
+          </div>
+
+          <div className="card">
+            <h3>Create Collection</h3>
+            <div className="grid two">
+              <div>
+                <label>Voice Profile Name</label>
+                <input
+                  value={vpCreateForm.voice_profile_name}
+                  onChange={(e) => setVpCreateForm((prev) => ({ ...prev, voice_profile_name: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label>Platforms</label>
+                <div className="row">
+                  {TARGETS.map((p) => (
+                    <label key={`vp-platform-${p}`} className="tag">
+                      <input
+                        type="checkbox"
+                        checked={(vpCreateForm.platforms || []).includes(p)}
+                        onChange={() => toggleVpPlatform(p)}
+                        style={{ width: "auto", marginRight: "6px" }}
+                      />
+                      {p}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="row" style={{ marginTop: "10px" }}>
+              <button className="primary" disabled={busy || !authToken} onClick={onVpCreateCollection}>Create Collection</button>
+              <button className="secondary" disabled={busy || !authToken} onClick={() => loadVpCollections().catch(() => {})}>Refresh</button>
+            </div>
+          </div>
+
+          <div className="card">
+            <h3>Collections</h3>
+            {vpCollections.length === 0 ? <p className="note">No voice profile collections found.</p> : null}
+            <div className="row">
+              {vpCollections.map((c) => (
+                <button
+                  key={c.voice_profile_id}
+                  className={vpSelectedCollectionId === c.voice_profile_id ? "primary" : "secondary"}
+                  onClick={() => setVpSelectedCollectionId(c.voice_profile_id)}
+                >
+                  {c.voice_profile_name}
+                </button>
+              ))}
+            </div>
+            {vpSelectedCollectionId ? (
+              <p className="note" style={{ marginTop: "8px" }}>Selected collection id: {vpSelectedCollectionId}</p>
+            ) : null}
+          </div>
+
+          <div className="card">
+            <h3>Generate Voice Profile Version</h3>
+            <div>
+              <label>Intended Use</label>
+              <input
+                value={vpGenerateForm.intended_use}
+                onChange={(e) => setVpGenerateForm((prev) => ({ ...prev, intended_use: e.target.value }))}
+                placeholder="drafting / analysis / coaching"
+              />
+            </div>
+            {(vpGenerateForm.datasets || []).map((row, idx) => (
+              <div key={`vp-ds-${idx}`} className="card" style={{ marginTop: "12px", marginBottom: 0 }}>
+                <div className="row" style={{ justifyContent: "space-between" }}>
+                  <h3 style={{ marginBottom: 0 }}>Dataset {idx + 1}</h3>
+                  <button className="danger" onClick={() => removeVpDatasetRow(idx)} disabled={vpGenerateForm.datasets.length <= 1}>Remove</button>
+                </div>
+                <div className="grid two" style={{ marginTop: "8px" }}>
+                  <div>
+                    <label>Dataset Name</label>
+                    <input value={row.dataset_name || ""} onChange={(e) => updateVpDatasetRow(idx, "dataset_name", e.target.value)} />
+                  </div>
+                  <div>
+                    <label>Source Profile (optional)</label>
+                    <input value={row.source_profile || ""} onChange={(e) => updateVpDatasetRow(idx, "source_profile", e.target.value)} />
+                  </div>
+                  <div>
+                    <label>Blob Prefix</label>
+                    <input
+                      value={row.blob_prefix || ""}
+                      onChange={(e) => updateVpDatasetRow(idx, "blob_prefix", e.target.value)}
+                      placeholder="user_id/dataset_name/ (or full blob URL)"
+                    />
+                  </div>
+                </div>
+                <div style={{ marginTop: "8px" }}>
+                  <label>Sample Scope Note (optional)</label>
+                  <textarea value={row.sample_scope_note || ""} onChange={(e) => updateVpDatasetRow(idx, "sample_scope_note", e.target.value)} />
+                </div>
+              </div>
+            ))}
+            <div className="row" style={{ marginTop: "10px" }}>
+              <button className="secondary" disabled={busy || !authToken} onClick={addVpDatasetRow}>Add Another Dataset</button>
+              <button className="primary" disabled={busy || !authToken || !vpSelectedCollectionId} onClick={onVpGenerateVersion}>
+                {isVpGenerating ? "Generating Version..." : "Generate Version"}
+              </button>
+            </div>
+            <p className="note" style={{ marginTop: "8px" }}>
+              Dataset ID is system-generated by backend. Add another dataset only if one version should learn from multiple sources.
+            </p>
+            <p className="note" style={{ marginTop: "6px" }}>
+              Blob Prefix should point inside container `profile-entries` (for example `ckashyap/Top_Posts/`).
+            </p>
+            {isVpGenerating ? (
+              <div style={{ marginTop: "10px" }}>
+                <div className="progress-label">Generating voice profile version...</div>
+                <div className="progress-track">
+                  <div className="progress-fill indeterminate" style={{ width: "35%" }} />
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="card">
+            <h3>Version Controls</h3>
+            {!vpCollectionDetail?.versions?.length ? <p className="note">No versions available for selected collection.</p> : null}
+            <div className="row">
+              {(vpCollectionDetail?.versions || []).map((v) => (
+                <button
+                  key={v.voice_profile_version_id}
+                  className={vpSelectedVersionId === v.voice_profile_version_id ? "primary" : "secondary"}
+                  onClick={() => setVpSelectedVersionId(v.voice_profile_version_id)}
+                >
+                  v{v.version_no} {v.is_active ? "(active)" : ""}
+                </button>
+              ))}
+            </div>
+            <div className="row" style={{ marginTop: "10px" }}>
+              <button className="primary" disabled={busy || !authToken || !vpSelectedVersionId} onClick={onVpActivateVersion}>Activate Selected Version</button>
+              <input
+                style={{ maxWidth: "240px" }}
+                value={vpStatusInput}
+                onChange={(e) => setVpStatusInput(e.target.value)}
+                placeholder="approved / rejected / generated"
+              />
+              <button className="secondary" disabled={busy || !authToken || !vpSelectedVersionId} onClick={onVpUpdateStatus}>Update Status</button>
+            </div>
+            {vpVersionDetail ? (
+              <>
+                <h3 style={{ marginTop: "14px" }}>Version Detail</h3>
+                <pre className="content">{JSON.stringify(vpVersionDetail, null, 2)}</pre>
+              </>
+            ) : null}
+          </div>
+        </>
+      )}
+
+      {isAuthenticated && page === "editorial" && (
         <div className="card">
           <h2>Editorial Workspace</h2>
           <div className="grid two">
@@ -989,7 +1633,7 @@ export default function App() {
         </div>
       )}
 
-      {page === "artifacts" && (
+      {isAuthenticated && page === "artifacts" && (
         <div className="card">
           <h2>Artifact Generator</h2>
           <p className="note">Select one or more formats and generate artifacts from finalized content.</p>
@@ -1032,12 +1676,18 @@ export default function App() {
             <button className="primary" disabled={busy} onClick={onGenerateArtifacts}>
               {isArtifactGenerating ? "Generating Artifacts..." : "Generate Artifacts"}
             </button>
-            <button className="secondary" disabled={busy} onClick={onViewStoredArtifacts}>
+            <button
+              className="secondary"
+              disabled={busy || isCheckingStoredArtifacts || !hasStoredArtifactsForProject}
+              onClick={onViewStoredArtifacts}
+            >
               {isStoredArtifactsLoading ? "Loading Stored Artifacts..." : "View Stored Artifacts"}
             </button>
-            <button className="secondary" disabled={busy} onClick={() => setPage("editorial")}>Back to Editorial</button>
           </div>
-          {generatedArtifacts.length > 0 ? (
+          {isCheckingStoredArtifacts ? (
+            <p className="note" style={{ marginTop: "8px" }}>Checking stored artifacts for this project...</p>
+          ) : null}
+          {artifactsViewMode === "generate" && generatedArtifacts.length > 0 ? (
             <>
               <h3 style={{ marginTop: "16px" }}>Generated Artifacts</h3>
               <div className="row" style={{ marginBottom: "8px" }}>
@@ -1057,7 +1707,7 @@ export default function App() {
               ) : null}
             </>
           ) : null}
-          {storedArtifacts.length > 0 ? (
+          {artifactsViewMode === "stored" && storedArtifacts.length > 0 ? (
             <>
               <h3 style={{ marginTop: "16px" }}>Stored Artifacts</h3>
               <div className="grid two">
@@ -1106,3 +1756,5 @@ export default function App() {
     </div>
   );
 }
+
+

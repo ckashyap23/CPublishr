@@ -25,6 +25,7 @@ Health:
 - `GET /api/v1/health/`
 
 Projects:
+- `GET /api/v1/projects/` (user-scoped project list for UI dropdown)
 - `POST /api/v1/projects/`
 - `GET /api/v1/projects/{project_id}`
 
@@ -48,7 +49,7 @@ Editorial:
 
 Artifacts:
 - `POST /api/v1/workflows/nodes/artifacts/generate`
-- `POST /api/v1/artifacts/generate` (full catalog on-demand)
+- `POST /api/v1/artifacts/generate` (full catalog on-demand; supports `style_settings` and `style_settings_by_format`)
 - `GET /api/v1/artifacts/catalog/formats` (dynamic format catalog for UI and clients)
 - `GET /api/v1/artifacts/{project_id}`
 - `GET /api/v1/artifacts/{project_id}/{format}`
@@ -176,8 +177,9 @@ The UI supports:
 - iterate preview/save/finalize flow
 - save-time version naming (prompt on save click)
 - artifact generation by kind/format multi-select
+- per-format artifact style settings (`style_settings_by_format`, used for image generation)
 - generated artifact view as per-artifact tabs
-- stored artifact retrieval view
+- stored artifact retrieval view (shown as a separate artifacts sub-view)
 
 ## 8. Important Operational Notes
 

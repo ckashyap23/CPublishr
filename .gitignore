@@ -15,3 +15,13 @@ backend/.env
 # frontend
 ui/react/node_modules/
 ui/react/dist/
+
+# local tooling / scratch
+.venv_dbinspect/
+scripts/_dbinspect_*.py
+Voiceprofile.md
+
+backend/_db_dump_public.json
+backend/_local_run.db
+backend/src/services/orchestration/artifacts/formats/images/
+backend/src/services/orchestration/artifacts/formats/text/
