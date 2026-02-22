@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     azure_openai_api_version: str = "2024-12-01-preview"
     artifact_text_llm_enabled: bool = False
 
+    # Image generation (DALL-E 3); empty = simulated mode
+    azure_openai_image_deployment: str = ""
+    azure_openai_image_api_version: str = "2024-02-15-preview"
+
     # Azure Blob storage for voice profile dataset ingestion
     azure_storage_connection_string: str = ""
     azure_profile_entries_container: str = "profile-entries"
