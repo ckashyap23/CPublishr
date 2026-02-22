@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     azure_openai_api_version: str = "2024-12-01-preview"
     artifact_text_llm_enabled: bool = False
 
+    # Image generation (DALL-E 3); empty = simulated mode
+    azure_openai_image_deployment: str = ""
+    azure_openai_image_api_version: str = "2024-02-15-preview"
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
