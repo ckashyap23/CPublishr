@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     azure_storage_connection_string: str = ""
     azure_profile_entries_container: str = "profile-entries"
 
+    # Azure Blob storage for generated artifacts (private container + SAS URLs)
+    azure_artifacts_enabled: bool = False
+    azure_artifacts_container: str = "artifacts"
+    azure_artifacts_blob_prefix: str = "artifacts"
+    azure_artifacts_public_read: bool = False
+    azure_artifacts_sas_ttl_minutes: int = 60
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

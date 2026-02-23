@@ -49,6 +49,30 @@ const STANCE_OPTIONS = ["neutral", "supportive", "contrarian", "balanced"];
 const PRIMARY_GOAL_OPTIONS = ["", "educate", "thought_leadership", "promote", "entertain", "recruit", "community", "convert"];
 const DESIRED_ACTION_OPTIONS = ["", "comment", "share", "follow", "click", "dm", "subscribe", "buy"];
 const TARGETS = ["linkedin", "x", "youtube", "instagram", "substack", "medium", "github"];
+const ARTIFACT_FORMAT_DISPLAY_ORDER = {
+  text: [
+    "instagram_caption",
+    "x_post",
+    "linkedin_post",
+    "script_short",
+    "blog_long",
+    "newsletter",
+    "cta_variants",
+  ],
+};
+
+function orderArtifactFormats(kind, formats) {
+  const items = Array.isArray(formats) ? [...formats] : [];
+  const preferred = ARTIFACT_FORMAT_DISPLAY_ORDER[kind] || [];
+  if (!preferred.length) return items;
+  const rank = new Map(preferred.map((fmt, idx) => [fmt, idx]));
+  return items.sort((a, b) => {
+    const aRank = rank.has(a) ? rank.get(a) : Number.MAX_SAFE_INTEGER;
+    const bRank = rank.has(b) ? rank.get(b) : Number.MAX_SAFE_INTEGER;
+    if (aRank !== bRank) return aRank - bRank;
+    return String(a).localeCompare(String(b));
+  });
+}
 
 function LabelWithTooltip({ text, tooltip }) {
   return (
@@ -89,6 +113,43 @@ function getVersionLabel(v) {
   if (v.version_kind === "variant") return v.variant_label || `variant v${v.version_number}`;
   if (v.version_kind === "editorial") return v.variant_label || `editorial v${v.version_number}`;
   return `version ${v.version_number}`;
+}
+
+function uniqueStrings(values) {
+  const out = [];
+  const seen = new Set();
+  for (const v of Array.isArray(values) ? values : []) {
+    const s = String(v || "").trim();
+    if (!s) continue;
+    const key = s.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
+function hashtagListFromArtifact(artifact) {
+  const tags = uniqueStrings(artifact?.tags_json);
+  const fromTags = tags.filter((t) => t.startsWith("#"));
+  if (fromTags.length) return fromTags;
+  const body = String(artifact?.payload_json?.body || "");
+  const matches = body.match(/#[\p{L}\p{N}_]+/gu) || [];
+  return uniqueStrings(matches);
+}
+
+function topicTagListFromArtifact(artifact) {
+  return uniqueStrings(artifact?.tags_json).filter((t) => !t.startsWith("#"));
+}
+
+function imageSrcFromAsset(asset) {
+  const uri = String(asset?.uri || "");
+  if (/^(data:|https?:|blob:)/i.test(uri)) return uri;
+  const path = String(asset?.path || "");
+  if (/^[A-Za-z]:\\/.test(path)) {
+    return `file:///${path.replace(/\\/g, "/")}`;
+  }
+  return "";
 }
 
 export default function App() {
@@ -146,7 +207,8 @@ export default function App() {
   const [isStoredArtifactsLoading, setIsStoredArtifactsLoading] = useState(false);
   const [hasStoredArtifactsForProject, setHasStoredArtifactsForProject] = useState(false);
   const [isCheckingStoredArtifacts, setIsCheckingStoredArtifacts] = useState(false);
-  const [artifactsViewMode, setArtifactsViewMode] = useState("generate");
+  const [storedArtifactFormatsForProject, setStoredArtifactFormatsForProject] = useState([]);
+  const [artifactsViewMode, setArtifactsViewMode] = useState("");
 
   const [vpCollections, setVpCollections] = useState([]);
   const [vpSelectedCollectionId, setVpSelectedCollectionId] = useState("");
@@ -227,6 +289,110 @@ export default function App() {
         };
       });
   }, [vpCollections]);
+
+  function renderStoredArtifactContent(artifact) {
+    if (!artifact) return null;
+    const fmt = String(artifact.format || "").trim();
+    const payload = artifact?.payload_json && typeof artifact.payload_json === "object" ? artifact.payload_json : {};
+    const body = typeof payload.body === "string" ? payload.body : "";
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const settings = payload?.settings && typeof payload.settings === "object" ? payload.settings : {};
+    const hashtags = hashtagListFromArtifact(artifact);
+
+    if (fmt === "image_generation") {
+      const assets = Array.isArray(payload.assets) ? payload.assets : [];
+      const imageAsset = assets.find((a) => String(a?.mime_type || "").startsWith("image/")) || assets[0] || null;
+      const imageSrc = imageSrcFromAsset(imageAsset);
+      return (
+        <div className="artifact-render">
+          <h4 className="artifact-render-title">{artifact.title || "Image Artifact"}</h4>
+          {imageSrc ? (
+            <img className="artifact-image-preview" src={imageSrc} alt={artifact.title || "Generated image"} />
+          ) : (
+            <p className="note">
+              Image preview unavailable in browser. URI: <code>{String(imageAsset?.uri || imageAsset?.path || "not available")}</code>
+            </p>
+          )}
+          {imageAsset ? (
+            <p className="note">Format: {imageAsset.format || "-"}{imageAsset.path ? ` | Path: ${imageAsset.path}` : ""}</p>
+          ) : null}
+        </div>
+      );
+    }
+
+    if (fmt === "cta_variants") {
+      const ctas = items
+        .map((item) => ({ text: String(item?.text || "").trim(), seq: Number(item?.sequence || 0) }))
+        .filter((x) => x.text)
+        .sort((a, b) => a.seq - b.seq);
+      return (
+        <div className="artifact-render">
+          <h4 className="artifact-render-title">{artifact.title || "CTA Variants"}</h4>
+          <div className="artifact-cta-grid">
+            {ctas.map((cta, idx) => (
+              <button key={`${cta.seq}-${idx}`} type="button" className="secondary artifact-cta-button">
+                {cta.text}
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    if (fmt === "script_short") {
+      const beats = items
+        .map((item) => ({ text: String(item?.text || "").trim(), seq: Number(item?.sequence || 0) }))
+        .filter((x) => x.text)
+        .sort((a, b) => a.seq - b.seq);
+      const targetDurationSec = Number(settings?.target_duration_sec || 0);
+      return (
+        <div className="artifact-render">
+          <h4 className="artifact-render-title">{artifact.title || "Short Script"}</h4>
+          {targetDurationSec > 0 ? (
+            <p className="note" style={{ marginTop: "-2px", marginBottom: "10px" }}>
+              Target duration: {targetDurationSec}s
+            </p>
+          ) : null}
+          <div className="artifact-doc">
+            {beats.map((beat, idx) => (
+              <p key={`${beat.seq}-${idx}`} className="artifact-script-line">{beat.text}</p>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    if (fmt === "blog_long" || fmt === "newsletter") {
+      const topicTags = topicTagListFromArtifact(artifact);
+      return (
+        <div className="artifact-render">
+          <h4 className="artifact-render-title">{artifact.title || fmt}</h4>
+          <article className="artifact-doc">{body || "No content available."}</article>
+          {topicTags.length ? (
+            <div className="artifact-hashtags">
+              {topicTags.map((tag) => <span key={tag} className="artifact-hashtag">{tag}</span>)}
+            </div>
+          ) : null}
+        </div>
+      );
+    }
+
+    if (fmt === "x_post" || fmt === "linkedin_post" || fmt === "instagram_caption") {
+      return (
+        <div className="artifact-render">
+          <h4 className="artifact-render-title">{artifact.title || fmt}</h4>
+          <div className="artifact-social">{body || "No content available."}</div>
+          {hashtags.length ? (
+            <div className="artifact-hashtags">
+              {hashtags.map((tag) => <span key={tag} className="artifact-hashtag">{tag}</span>)}
+            </div>
+          ) : null}
+        </div>
+      );
+    }
+
+    return <pre className="content">{JSON.stringify(artifact, null, 2)}</pre>;
+  }
 
   async function refreshVersions(projectId, preferredVersion) {
     const data = await request("GET", `/api/v1/versions/${projectId}`);
@@ -596,7 +762,7 @@ export default function App() {
   }
 
   function toggleArtifactKind(kind) {
-    const formats = artifactFormatsByKind[kind] || [];
+    const formats = orderArtifactFormats(kind, artifactFormatsByKind[kind] || []);
     const current = new Set(selectedArtifactFormats);
     const allSelected = formats.every((fmt) => current.has(fmt));
     if (allSelected) {
@@ -910,6 +1076,10 @@ export default function App() {
       setSelectedArtifactTab(0);
       const count = Array.isArray(out?.artifacts) ? out.artifacts.length : 0;
       setHasStoredArtifactsForProject(count > 0 || hasStoredArtifactsForProject);
+      if (Array.isArray(out?.artifacts)) {
+        const generatedFormats = out.artifacts.map((a) => String(a?.format || "").trim()).filter(Boolean);
+        setStoredArtifactFormatsForProject((prev) => uniqueStrings([...(prev || []), ...generatedFormats]));
+      }
       setMessage(`Generated ${count} artifact(s).`);
     } catch (e) {
       setError(e.message || String(e));
@@ -930,6 +1100,7 @@ export default function App() {
       const items = Array.isArray(out?.artifacts) ? out.artifacts : [];
       setStoredArtifacts(items);
       const formats = Array.from(new Set(items.map((a) => (a?.format || "").trim()).filter(Boolean))).sort();
+      setStoredArtifactFormatsForProject(formats);
       setSelectedStoredFormat(formats[0] || "");
       setSelectedStoredArtifactTab(0);
       const count = Array.isArray(out?.artifacts) ? out.artifacts.length : 0;
@@ -950,6 +1121,7 @@ export default function App() {
     if (!authToken || !normalizedProjectId) {
       setHasStoredArtifactsForProject(false);
       setIsCheckingStoredArtifacts(false);
+      setStoredArtifactFormatsForProject([]);
       return;
     }
     setIsCheckingStoredArtifacts(true);
@@ -958,14 +1130,24 @@ export default function App() {
       if (requestSeq !== storedArtifactsCheckSeqRef.current) return;
       const items = Array.isArray(out?.artifacts) ? out.artifacts : [];
       setHasStoredArtifactsForProject(items.length > 0);
+      setStoredArtifactFormatsForProject(
+        uniqueStrings(items.map((a) => String(a?.format || "").trim()).filter(Boolean))
+      );
     } catch {
       if (requestSeq !== storedArtifactsCheckSeqRef.current) return;
       setHasStoredArtifactsForProject(false);
+      setStoredArtifactFormatsForProject([]);
     } finally {
       if (requestSeq !== storedArtifactsCheckSeqRef.current) return;
       setIsCheckingStoredArtifacts(false);
     }
   }
+
+  useEffect(() => {
+    if (page !== "artifacts") return;
+    setArtifactsViewMode("");
+    setSelectedArtifactFormats([]);
+  }, [page]);
 
   useEffect(() => {
     if (!selectedVersion) return;
@@ -987,12 +1169,15 @@ export default function App() {
     if (!isAuthenticated) {
       setHasStoredArtifactsForProject(false);
       setIsCheckingStoredArtifacts(false);
+      setStoredArtifactFormatsForProject([]);
       return;
     }
     const projectId = (form.project_id || "").trim();
     setStoredArtifacts([]);
     setSelectedStoredFormat("");
     setSelectedStoredArtifactTab(0);
+    setSelectedArtifactFormats([]);
+    setArtifactsViewMode("");
     checkStoredArtifactsAvailability(projectId);
   }, [form.project_id, apiBaseUrl, isAuthenticated, authToken]);
 
@@ -1636,29 +1821,78 @@ export default function App() {
       {isAuthenticated && page === "artifacts" && (
         <div className="card">
           <h2>Artifact Generator</h2>
-          <p className="note">Select one or more formats and generate artifacts from finalized content.</p>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", marginBottom: "10px" }}>
+            <div className="row">
+              <button
+                className={artifactsViewMode === "stored" ? "primary" : "secondary"}
+                disabled={busy || isCheckingStoredArtifacts || !hasStoredArtifactsForProject}
+                onClick={onViewStoredArtifacts}
+              >
+                {isStoredArtifactsLoading ? "Loading Artifacts..." : "View Artifacts"}
+              </button>
+              <button
+                className={artifactsViewMode === "generate" || artifactsViewMode === "" ? "primary" : "secondary"}
+                disabled={busy}
+                onClick={() => setArtifactsViewMode("generate")}
+              >
+                Generate Artifacts
+              </button>
+            </div>
+            {artifactsViewMode === "stored" ? (
+              <div style={{ minWidth: "320px", maxWidth: "420px", flex: "1 1 360px" }}>
+                <label>Select Stored Format</label>
+                <select
+                  value={selectedStoredFormat}
+                  onChange={(e) => {
+                    setSelectedStoredFormat(e.target.value);
+                    setSelectedStoredArtifactTab(0);
+                  }}
+                >
+                  <option value="" disabled>Select format</option>
+                  {storedFormats.map((fmt) => (
+                    <option key={fmt} value={fmt}>{fmt}</option>
+                  ))}
+                </select>
+              </div>
+            ) : <div />}
+          </div>
+          {artifactsViewMode === "" ? (
+            <p className="note">Choose `Generate Artifacts` or `View Artifacts` to load a view.</p>
+          ) : null}
+          {artifactsViewMode === "generate" ? (
+            <>
           <label>Artifact Formats by Kind</label>
           {["text", "image", "gif", "video", "audio"].map((kind) => {
-            const formats = artifactFormatsByKind[kind] || [];
+            const formats = orderArtifactFormats(kind, artifactFormatsByKind[kind] || []);
             const selectedCount = formats.filter((fmt) => selectedArtifactFormats.includes(fmt)).length;
             const allSelected = formats.length > 0 && selectedCount === formats.length;
+            const showBulkToggle = formats.length > 3;
             return (
               <div key={kind} style={{ marginBottom: "12px" }}>
                 <div className="row" style={{ marginBottom: "6px" }}>
                   <strong style={{ textTransform: "capitalize" }}>{kind}</strong>
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={busy}
-                    onClick={() => toggleArtifactKind(kind)}
-                  >
-                    {allSelected ? "Unselect All" : "Select All"}
-                  </button>
+                  {showBulkToggle ? (
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={busy}
+                      onClick={() => toggleArtifactKind(kind)}
+                    >
+                      {allSelected ? "Unselect All" : "Select All"}
+                    </button>
+                  ) : null}
                   <span className="note">{selectedCount}/{formats.length} selected</span>
                 </div>
                 <div className="row">
                   {formats.map((fmt) => (
-                    <label key={fmt} className="tag">
+                    <label
+                      key={fmt}
+                      className={`tag artifact-format-chip ${
+                        storedArtifactFormatsForProject.includes(fmt)
+                          ? "artifact-format-chip-existing"
+                          : "artifact-format-chip-missing"
+                      }`}
+                    >
                       <input
                         type="checkbox"
                         checked={selectedArtifactFormats.includes(fmt)}
@@ -1674,16 +1908,11 @@ export default function App() {
           })}
           <div className="row" style={{ marginTop: "12px" }}>
             <button className="primary" disabled={busy} onClick={onGenerateArtifacts}>
-              {isArtifactGenerating ? "Generating Artifacts..." : "Generate Artifacts"}
-            </button>
-            <button
-              className="secondary"
-              disabled={busy || isCheckingStoredArtifacts || !hasStoredArtifactsForProject}
-              onClick={onViewStoredArtifacts}
-            >
-              {isStoredArtifactsLoading ? "Loading Stored Artifacts..." : "View Stored Artifacts"}
+              {isArtifactGenerating ? "Generating Artifacts..." : "Generate Selected Artifacts"}
             </button>
           </div>
+            </>
+          ) : null}
           {isCheckingStoredArtifacts ? (
             <p className="note" style={{ marginTop: "8px" }}>Checking stored artifacts for this project...</p>
           ) : null}
@@ -1710,23 +1939,6 @@ export default function App() {
           {artifactsViewMode === "stored" && storedArtifacts.length > 0 ? (
             <>
               <h3 style={{ marginTop: "16px" }}>Stored Artifacts</h3>
-              <div className="grid two">
-                <div>
-                  <label>Select Stored Format</label>
-                  <select
-                    value={selectedStoredFormat}
-                    onChange={(e) => {
-                      setSelectedStoredFormat(e.target.value);
-                      setSelectedStoredArtifactTab(0);
-                    }}
-                  >
-                    <option value="" disabled>Select format</option>
-                    {storedFormats.map((fmt) => (
-                      <option key={fmt} value={fmt}>{fmt}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
               {filteredStoredArtifacts.length > 0 ? (
                 <>
                   <div className="row" style={{ marginTop: "8px", marginBottom: "8px" }}>
@@ -1742,7 +1954,7 @@ export default function App() {
                     ))}
                   </div>
                   {selectedStoredArtifact ? (
-                    <pre className="content">{JSON.stringify(selectedStoredArtifact, null, 2)}</pre>
+                    renderStoredArtifactContent(selectedStoredArtifact)
                   ) : null}
                 </>
               ) : (

@@ -80,8 +80,84 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .tag { background: #eef3ff; border: 1px solid #d6e1ff; border-radius: 999px; padding: 4px 10px; font-size: 12px; }
 .tag button { background: transparent; color: #8b1d27; padding: 0; margin-left: 8px; }
+.artifact-format-chip {
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.artifact-format-chip-existing {
+  background: #edf3ff;
+  border-color: #bfd3ff;
+}
+.artifact-format-chip-missing {
+  background: #dce9ff;
+  border-color: #8fb4ff;
+}
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 pre.content { background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 12px; white-space: pre-wrap; max-height: 420px; overflow: auto; }
+.artifact-render {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+}
+.artifact-render-title {
+  margin: 0 0 10px;
+}
+.artifact-doc {
+  background: #fff;
+  border: 1px solid #e4eaf2;
+  border-radius: 10px;
+  padding: 14px;
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+.artifact-social {
+  background: #fff;
+  border: 1px solid #e4eaf2;
+  border-radius: 10px;
+  padding: 14px;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+.artifact-script-line {
+  margin: 0 0 10px;
+}
+.artifact-script-line:last-child {
+  margin-bottom: 0;
+}
+.artifact-hashtags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.artifact-hashtag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 5px 10px;
+  border: 1px solid #bfd3ff;
+  background: #edf3ff;
+  color: #0d4cd3;
+  font-size: 12px;
+  font-weight: 600;
+}
+.artifact-cta-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.artifact-cta-button {
+  text-align: left;
+}
+.artifact-image-preview {
+  width: 100%;
+  max-width: 720px;
+  display: block;
+  border-radius: 10px;
+  border: 1px solid #dfe6f1;
+  background: #fff;
+  margin-bottom: 8px;
+}
 .note { color: var(--muted); font-size: 13px; }
 .status.ok { background: var(--ok); padding: 10px; border-radius: 8px; }
 .status.warn { background: var(--warn); padding: 10px; border-radius: 8px; }

@@ -14,6 +14,7 @@ IMAGES_DIR = Path(__file__).resolve().parent / "images"
 from src.core.config import settings
 from src.services.orchestration.artifact_schema import default_payload_template
 from src.services.orchestration.artifacts.contracts import ArtifactDraft, PipelineContext
+from src.services.storage.artifact_blob_storage import upload_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -42,15 +43,22 @@ def _call_azure_dalle(
     quality: str = "standard",
     style: str = "vivid",
     response_format: str = "b64_json",
-) -> dict[str, Any] | None:
-    """Call Azure OpenAI DALL-E 3 Images API. Returns response data or None on failure."""
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Call Azure OpenAI DALL-E 3 Images API. Returns (response_data, error_message)."""
     deployment = (settings.azure_openai_image_deployment or "").strip()
     endpoint = (settings.azure_openai_endpoint or "").rstrip("/")
     api_key = (settings.azure_openai_subscription_key or "").strip()
     api_version = settings.azure_openai_image_api_version
 
     if not deployment or not endpoint or not api_key:
-        return None
+        missing: list[str] = []
+        if not deployment:
+            missing.append("AZURE_OPENAI_IMAGE_DEPLOYMENT")
+        if not endpoint:
+            missing.append("AZURE_OPENAI_ENDPOINT")
+        if not api_key:
+            missing.append("AZURE_OPENAI_SUBSCRIPTION_KEY")
+        return None, f"Missing Azure image configuration: {', '.join(missing)}"
 
     url = f"{endpoint}/openai/deployments/{deployment}/images/generations?api-version={api_version}"
     headers = {"api-key": api_key, "Content-Type": "application/json"}
@@ -67,10 +75,17 @@ def _call_azure_dalle(
         with httpx.Client(timeout=60.0) as client:
             resp = client.post(url, headers=headers, json=body)
             resp.raise_for_status()
-            return resp.json()
+            return resp.json(), None
+    except httpx.HTTPStatusError as e:
+        detail = (e.response.text or "").strip()
+        msg = f"Azure DALL-E HTTP {e.response.status_code}"
+        if detail:
+            msg = f"{msg}: {detail[:500]}"
+        logger.warning("Azure DALL-E image generation failed: %s", msg)
+        return None, msg
     except Exception as e:
         logger.warning("Azure DALL-E image generation failed: %s", e)
-        return None
+        return None, str(e)
 
 
 def _save_image_to_disk(b64_data: str, ext: str, project_id: str = "", topic_title: str = "") -> Path | None:
@@ -93,7 +108,7 @@ def connect_openai_images(*, prompt: str, output_formats: list[str], options: di
     quality = str(options.get("quality") or "standard").strip().lower()
     style = str(options.get("style") or "vivid").strip().lower()
 
-    api_response = _call_azure_dalle(
+    api_response, api_error = _call_azure_dalle(
         prompt=prompt,
         size=size if "x" in size else "1024x1024",
         quality=quality if quality in ("standard", "hd") else "standard",
@@ -110,31 +125,54 @@ def connect_openai_images(*, prompt: str, output_formats: list[str], options: di
                 ext = "jpeg"
             file_ext = ext if ext != "jpeg" else "jpg"
             mime = f"image/{ext}"
+            image_bytes = base64.b64decode(b64)
             project_id = str(options.get("project_id") or "")
+            user_id = str(options.get("user_id") or "")
             topic_title = str(options.get("topic_title") or "")
 
             saved_path = _save_image_to_disk(b64, file_ext, project_id, topic_title)
-            uri = str(saved_path) if saved_path else f"data:{mime};base64,{b64}"
+            local_filename = saved_path.name if saved_path else f"image_{int(time.time() * 1000)}.{file_ext}"
+            artifact_key = saved_path.stem if saved_path else f"img_{int(time.time() * 1000)}"
+            blob_ref = upload_bytes(
+                data=image_bytes,
+                user_id=user_id or "user",
+                project_id=project_id or "project",
+                format="image_generation",
+                artifact_id=artifact_key,
+                filename=local_filename,
+                content_type=mime,
+            )
+            uri = blob_ref["uri"] if blob_ref else (str(saved_path) if saved_path else f"data:{mime};base64,{b64}")
+            save_error = None if saved_path else "Image generated but local file save failed; returning inline data URI."
+            if blob_ref and save_error:
+                save_error = "Image uploaded to Azure Blob, but local file save failed."
             return {
                 "provider": "openai",
                 "status": "generated",
                 "prompt": prompt,
                 "options": options,
+                "error_message": save_error,
                 "images": [
                     {
                         "format": file_ext,
                         "mime_type": mime,
                         "uri": uri,
                         "path": str(saved_path) if saved_path else None,
+                        "blob_path": (blob_ref or {}).get("blob_path"),
+                        "source": "azure_blob" if blob_ref else ("local_disk" if saved_path else "inline_data_uri"),
                     }
                 ],
             }
+        api_error = "Azure image response missing b64_json in first data item."
+    elif api_response:
+        api_error = "Azure image response returned no data items."
 
     return {
         "provider": "openai",
         "status": "simulated",
         "prompt": prompt,
         "options": options,
+        "error_message": api_error or "Image provider returned no usable image data; simulated response emitted.",
         "images": [
             {
                 "format": ext,
@@ -215,6 +253,7 @@ class ImageGenerationBuilder:
         prompt = self._build_prompt(ctx)
         options = dict(style_settings)
         options.setdefault("project_id", ctx.project_id)
+        options.setdefault("user_id", ctx.user_id)
         options.setdefault("topic_title", ctx.topic_title)
         tool_response = connector(prompt=prompt, output_formats=output_formats, options=options)
 
@@ -233,6 +272,8 @@ class ImageGenerationBuilder:
             "output_formats": output_formats,
             "status": tool_response.get("status", "simulated"),
         }
+        if tool_response.get("error_message"):
+            payload["settings"]["error_message"] = str(tool_response.get("error_message"))
         payload["notes"] = "Image generation produced via selected third-party connector."
 
         tags = [x for x in ctx.seed_keywords if isinstance(x, str) and x.strip()]
