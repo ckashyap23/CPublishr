@@ -26,6 +26,13 @@ Projects / workflow / artifacts (user-scoped):
 - `GET /api/v1/versions/{project_id}`
 - `POST /api/v1/artifacts/generate`
 - `GET /api/v1/artifacts/{project_id}`
+- `PATCH /api/v1/artifacts/item/{artifact_id}/title` (rename artifact title)
+
+Publishing (artifact-mapped, adapter-driven):
+- `GET /api/v1/publishing/platforms`
+- `GET /api/v1/publishing/platforms/{platform}/fields`
+- `POST /api/v1/publishing/jobs/artifacts`
+- `POST /api/v1/publishing/jobs` (legacy stub path using stored platform outputs)
 
 Voice profile module (user-scoped):
 - `POST /api/v1/voice-profiles/collections`
@@ -37,6 +44,7 @@ Voice profile module (user-scoped):
 - `POST /api/v1/voice-profiles/versions/{voice_profile_version_id}/status`
 
 Workflow/editorial/artifacts routes are active in the current UI-backed build.
+`Publish` workflow page is also available in the React UI (mapping UI enabled, publish action intentionally disabled until adapter publish implementation is completed).
 
 ## Fresh DB Behavior
 

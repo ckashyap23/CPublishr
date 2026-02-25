@@ -30,8 +30,14 @@ class Settings(BaseSettings):
     artifact_text_llm_enabled: bool = False
 
     # Image generation (DALL-E 3); empty = simulated mode
+    azure_openai_image_endpoint: str = ""  # If empty, falls back to azure_openai_endpoint
     azure_openai_image_deployment: str = ""
-    azure_openai_image_api_version: str = "2024-02-15-preview"
+    azure_openai_image_api_version: str = "2024-02-01"
+
+    # Video generation (Sora); empty = simulated mode
+    azure_sora_endpoint: str = ""
+    azure_sora_api_key: str = ""
+    azure_sora_api_version: str = "preview"
 
     # Azure Blob storage for voice profile dataset ingestion
     azure_storage_connection_string: str = ""

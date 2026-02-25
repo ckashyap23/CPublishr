@@ -76,7 +76,7 @@ Read from `PipelineContext` (`backend/src/services/orchestration/artifacts/contr
 - `ctx.seed_keywords`: keywords from selected content version
 - `ctx.topic_title`, `ctx.core_idea`
 - `ctx.target_audience` (object with `primary_segment`, optional `notes`), `ctx.audience_familiarity`, `ctx.detail_level`, `ctx.tone_preference`
-- `ctx.style_settings` (effective settings for the current format; may be shared request settings merged with per-format overrides)
+- `ctx.style_settings` (effective settings for the current format after orchestrator merges `style_settings_by_kind[kind] + style_settings_by_format[format]`)
 
 ----------------------------------------------------------------------
 
@@ -117,28 +117,45 @@ Generation flow:
 Note:
 - Artifact generation is executed via `POST /api/v1/artifacts/generate` (on-demand).
 - Current request contract supports:
-  - `style_settings` (shared defaults across selected formats)
-  - `style_settings_by_format` (per-format overrides, e.g. `image_generation`)
+  - `style_settings_by_kind` (kind-level settings, e.g. `text`, `image`)
+  - `style_settings_by_format` (per-format overrides)
 - Stage toggles (`stages.plan`, `stages.render_media`, etc.) are not part of the current request schema.
 - Some builders may persist local outputs in `backend/src/services/orchestration/artifacts/formats/` (for example image files under `images/` and text exports under `text/`) and include those paths in artifact payloads.
 - Some editorial finalize paths may run post-editorial pipeline, but `finalize-selected` itself only marks final version.
 
-Example request (multi-format with image-specific settings):
+Example request (multi-format with kind-scoped settings):
 
 ```json
 {
   "project_id": "proj_local_2",
-  "requested_formats": ["caption", "x_post", "image_generation"],
+  "requested_formats": ["caption", "post", "thumbnail"],
   "revision_mode": "new_revision",
-  "style_settings": {},
-  "style_settings_by_format": {
-    "image_generation": {
-      "tool_name": "openai",
-      "output_formats": ["png"],
-      "size": "1024x1024",
-      "quality": "standard",
-      "style": "vivid"
+  "style_settings_by_kind": {
+    "text": {
+      "style_source": "manual",
+      "core_voice": "crisp, practical, slightly witty, no fluff",
+      "tone_nuance": {
+        "directness": 3,
+        "warmth": 2,
+        "energy": 2,
+        "authority": 3
+      }
+    },
+    "image": {
+      "theme": "minimal fintech",
+      "subject_prompt": "A clean dashboard on laptop with subtle blue accents",
+      "avoid": ["watermark", "gibberish text", "brand logos"],
+      "medium": "illustration",
+      "texture": "clean",
+      "palette_mode": "muted",
+      "mood": "premium",
+      "focus_negative_space": "negative_space_right",
+      "output_fidelity": "hd"
     }
+  },
+  "style_settings_by_format": {
+    "caption": { "length": "short", "emoji_density": "light" },
+    "thumbnail": {}
   }
 }
 ```
@@ -163,4 +180,5 @@ This is populated from discovered builders, so your new format appears in UI aut
    - `GET /api/v1/artifacts/catalog/formats` includes your format
    - format appears in UI
    - `POST /api/v1/artifacts/generate` succeeds
-   - format-specific settings only affect the intended builder (when using `style_settings_by_format`)
+   - kind-specific settings flow only to builders of that kind
+   - format-specific overrides only affect the intended builder

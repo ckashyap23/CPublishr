@@ -16,16 +16,22 @@ Current UI for project workflow (Node 0-3/editorial), artifacts, and voice-profi
 3. Artifacts
    - Dynamic artifact format catalog (`GET /api/v1/artifacts/catalog/formats`)
    - Multi-select artifact generation (`POST /api/v1/artifacts/generate`)
-   - Per-format style settings support (UI sends image settings under `style_settings_by_format.image_generation`)
+   - Kind-scoped + per-format style settings (`style_settings_by_kind`, `style_settings_by_format`)
    - Stored artifacts view (`GET /api/v1/artifacts/{project_id}`)
-4. Voice profile collections
+   - Inline artifact rename in stored view (`PATCH /api/v1/artifacts/item/{artifact_id}/title`)
+4. Publish (artifact-mapped)
+   - Dynamic platform list from adapter registry (`GET /api/v1/publishing/platforms`)
+   - Dynamic platform field schema (`GET /api/v1/publishing/platforms/{platform}/fields`)
+   - Source-level artifact mapping UI (`artifact_id + part + render_as`)
+   - Publish button intentionally disabled until adapter publish API steps are implemented
+5. Voice profile collections
    - Create collection with profile name + multi-platform selection
    - List collections for the logged-in user
    - Load collection detail with versions
-5. Generate version from dataset inputs
+6. Generate version from dataset inputs
    - Supports one or more datasets per generation request
    - Fields per dataset: `dataset_id` (optional), `dataset_name`, `source_profile` (optional), `blob_prefix`, `sample_scope_note` (optional)
-6. Voice profile version controls
+7. Voice profile version controls
    - View generated version detail payloads
    - Activate selected version
    - Update status (`draft/generated/approved/rejected/failed`)
@@ -54,3 +60,4 @@ Set backend URL in UI (default is `http://127.0.0.1:8010`).
 
 - Header title is `Publishr`.
 - Artifacts page uses separate sub-views for generated vs stored artifacts (clicking `View Stored Artifacts` hides the generated panel).
+- Workflow tabs now include `Publish` (Setup / Editorial / Artifacts / Publish).

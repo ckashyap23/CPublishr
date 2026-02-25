@@ -7,7 +7,7 @@ class ArtifactGenerationRequest(BaseModel):
     project_id: str
     requested_formats: list[ArtifactFormat] = Field(default_factory=list)
     revision_mode: str = "new_revision"
-    style_settings: dict = Field(default_factory=dict)
+    style_settings_by_kind: dict[str, dict] = Field(default_factory=dict)
     style_settings_by_format: dict[str, dict] = Field(default_factory=dict)
 
 
@@ -16,3 +16,7 @@ class ArtifactGenerationResponse(BaseModel):
     requested_formats: list[str]
     options: dict
     artifacts: list[ArtifactEntity]
+
+
+class ArtifactTitleUpdateRequest(BaseModel):
+    title: str | None = None

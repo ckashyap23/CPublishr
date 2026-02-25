@@ -27,7 +27,7 @@ from src.services.orchestration.nodes.master_content import MasterContentNode
 from src.services.orchestration.nodes.research_trends import ResearchTrendsNode
 from src.services.orchestration.nodes.topic_initialization import TopicInitializationNode
 from src.services.orchestration.nodes.voice_profile_resolve import VoiceProfileResolveNode
-from src.services.platforms.registry import default_platform_registry
+from src.platforms.adapters.registry import default_platform_registry
 from src.utils.ids import new_id
 
 logger = logging.getLogger(__name__)

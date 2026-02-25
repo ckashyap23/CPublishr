@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# Deprecated one-time migration utility retained for history/reference only.
+# Prefer explicit Alembic migrations for new schema/data migrations.
+
 import argparse
 import json
 import sys
@@ -93,4 +96,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

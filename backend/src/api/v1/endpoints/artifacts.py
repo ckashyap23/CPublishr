@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from src.api.dependencies import get_current_user_id, get_db
 from src.contracts.prd import ArtifactEntity, ArtifactFormat, ArtifactKind, ArtifactListResponse
 from src.db.repositories.artifact_repository import ArtifactRepository
-from src.schemas.artifacts import ArtifactGenerationRequest, ArtifactGenerationResponse
+from src.schemas.artifacts import ArtifactGenerationRequest, ArtifactGenerationResponse, ArtifactTitleUpdateRequest
 from src.services.orchestration.artifact_schema import formats_by_kind_map
 from src.services.orchestration.artifacts.contracts import GenerationOptions
 from src.services.orchestration.artifacts.orchestrator import ArtifactPipelineOrchestrator
@@ -41,6 +41,21 @@ def list_artifact_formats_catalog() -> dict[str, dict[str, list[str]]]:
         raise HTTPException(status_code=500, detail=f"Failed to load artifact formats catalog: {exc}") from exc
 
 
+@router.patch("/item/{artifact_id}/title", response_model=ArtifactEntity)
+def update_artifact_title(
+    artifact_id: str,
+    payload: ArtifactTitleUpdateRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> ArtifactEntity:
+    repo = ArtifactRepository(db, user_id=user_id)
+    title = (str(payload.title).strip() if payload.title is not None else None)
+    row = repo.update_title(artifact_id, title=title or None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return _to_entity(row)
+
+
 @router.post("/generate", response_model=ArtifactGenerationResponse)
 def generate_artifacts(
     payload: ArtifactGenerationRequest,
@@ -54,7 +69,7 @@ def generate_artifacts(
             project_id=payload.project_id,
             requested_formats=[str(x) for x in requested_formats],
             options=GenerationOptions(revision_mode=payload.revision_mode),
-            style_settings=payload.style_settings or {},
+            style_settings_by_kind=payload.style_settings_by_kind or {},
             style_settings_by_format=payload.style_settings_by_format or {},
         )
     except ValueError as exc:

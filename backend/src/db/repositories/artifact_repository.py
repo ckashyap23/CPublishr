@@ -84,6 +84,25 @@ class ArtifactRepository:
         )
         return self.db.execute(stmt).scalars().first()
 
+    def get_artifact(self, artifact_id: str) -> Artifact | None:
+        stmt = (
+            select(Artifact)
+            .where(Artifact.user_id == self.user_id)
+            .where(Artifact.artifact_id == artifact_id)
+            .limit(1)
+        )
+        return self.db.execute(stmt).scalars().first()
+
+    def update_title(self, artifact_id: str, title: str | None) -> Artifact | None:
+        row = self.get_artifact(artifact_id)
+        if row is None:
+            return None
+        row.title = title
+        self.db.add(row)
+        self.db.commit()
+        self.db.refresh(row)
+        return row
+
     def lineage(self, artifact_id: str) -> list[Artifact]:
         rows: list[Artifact] = []
         current = self.db.get(Artifact, artifact_id)

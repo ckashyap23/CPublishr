@@ -306,42 +306,6 @@ class MasterContentNode(OrchestrationNode):
         return "\n".join(lines).strip()
 
     @staticmethod
-    def _compact_voice_block(voice: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Keep prompt payload compact and stable.
-        """
-        if not isinstance(voice, dict):
-            return {}
-
-        def _as_list(x: Any) -> List[str]:
-            if isinstance(x, list):
-                return [str(i).strip() for i in x if str(i).strip()]
-            return []
-
-        exemplars: List[dict] = []
-        ex = voice.get("exemplars")
-        if isinstance(ex, list):
-            for item in ex[:4]:
-                if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip():
-                    exemplars.append(
-                        {
-                            "text": item["text"].strip()[:200],
-                            "tags": item.get("tags") if isinstance(item.get("tags"), list) else [],
-                        }
-                    )
-                elif isinstance(item, str) and item.strip():
-                    exemplars.append({"text": item.strip()[:200], "tags": []})
-
-        return {
-            "core_voice": str(voice.get("core_voice") or "not specified"),
-            "tone_baseline": voice.get("tone_baseline") if isinstance(voice.get("tone_baseline"), dict) else {},
-            "style_summary": voice.get("style_summary") if isinstance(voice.get("style_summary"), dict) else {},
-            "do_rules": _as_list(voice.get("do_rules"))[:8],
-            "dont_rules": _as_list(voice.get("dont_rules"))[:8],
-            "exemplars": exemplars[:4],
-        }
-
-    @staticmethod
     def _build_editorial_brief(
         target_audience: str,
         target_audience_notes: str,
@@ -352,7 +316,6 @@ class MasterContentNode(OrchestrationNode):
         primary_goal: str,
         desired_action: str,
         constraints: Dict[str, Any],
-        voice_block: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         a = AUDIENCE_PLAYBOOK.get(target_audience, AUDIENCE_PLAYBOOK["general"])
         goal = GOAL_PLAYBOOK.get(primary_goal, {})
@@ -385,9 +348,6 @@ class MasterContentNode(OrchestrationNode):
             },
             "constraints": constraints,
         }
-
-        if voice_block:
-            brief["voice"] = voice_block
 
         return brief
 
@@ -588,18 +548,6 @@ Document to fix:
         primary_goal = str(b.get("primary_goal") or "not specified").strip().lower()
         desired_action = str(b.get("desired_action") or "not specified").strip().lower()
 
-        # Voice: ONLY use if user provided voice_profile_id
-        voice_profile_id = self._normalize_voice_profile_id(b.get("voice_profile_id"))
-        voice_block: Optional[Dict[str, Any]] = None
-        if voice_profile_id:
-            vp = context.state.get("voice_profile")
-            # Use only if it matches the requested id (avoid stale state)
-            if isinstance(vp, dict) and str(vp.get("voice_profile_id") or "") == voice_profile_id:
-                voice_block = self._compact_voice_block(vp)
-            else:
-                # resolver may not have run; proceed without voice rather than auto-fetch here
-                voice_block = None
-
         constraints = self._normalize_constraints(b.get("constraints"))
 
         research_context = self._format_research_context(r)
@@ -641,7 +589,6 @@ Document to fix:
                 primary_goal=primary_goal,
                 desired_action=desired_action,
                 constraints=constraints,
-                voice_block=voice_block,
             )
 
             # Prompts depend on structure policy
@@ -673,15 +620,6 @@ Rules for master_document:
                     '(e.g., ["Hook","Setup","Twist","Punchline","Close"]).'
                 )
 
-            voice_rules = ""
-            if voice_block:
-                voice_rules = """
-Voice rules (apply if present in editorial brief):
-- Mimic cadence, phrasing tendencies, formatting habits, and CTA style.
-- Use exemplars for inspiration; do NOT copy long sentences verbatim.
-- If voice rules conflict with constraints, constraints win.
-"""
-
             base_system_prompt = f"""
 You are an expert editorial writer generating CANONICAL master content (platform-agnostic).
 
@@ -689,7 +627,6 @@ Apply this editorial brief STRICTLY:
 {editorial_brief}
 
 {policy_rules}
-{voice_rules}
 
 Factuality rules:
 - Do NOT invent statistics, named entities, or factual claims not supported by research_context.

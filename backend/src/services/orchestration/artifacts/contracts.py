@@ -30,6 +30,15 @@ class PipelineContext:
     tone_preference: str | None = None
     requested_formats: list[str] = field(default_factory=list)
     style_settings: dict[str, Any] = field(default_factory=dict)
+    style_settings_by_kind: dict[str, dict[str, Any]] = field(default_factory=dict)
+    style_settings_by_format: dict[str, dict[str, Any]] = field(default_factory=dict)
+    style_source: str | None = None
+    voice_profile_id: str | None = None
+    tone_base: str | None = None
+    tone_nuance: dict[str, Any] = field(default_factory=dict)
+    style_context: dict[str, Any] = field(default_factory=dict)
+    image_style_settings: dict[str, Any] = field(default_factory=dict)
+    format_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass
