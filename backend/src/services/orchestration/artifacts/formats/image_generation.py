@@ -10,8 +10,6 @@ from typing import Any, Callable
 
 import httpx
 
-IMAGES_DIR = Path(__file__).resolve().parent / "images"
-
 from src.core.config import settings
 from src.services.orchestration.artifact_schema import default_payload_template
 from src.services.orchestration.artifacts.contracts import ArtifactDraft, PipelineContext
@@ -19,10 +17,14 @@ from src.services.storage.artifact_blob_storage import upload_bytes
 
 logger = logging.getLogger(__name__)
 
+IMAGES_DIR = Path(__file__).resolve().parent / "images"
 
-# ----------------------------
+DALLE_PROMPT_MAX_CHARS = 4000
+
+
+# =============================================================================
 # Provider connector registry
-# ----------------------------
+# =============================================================================
 
 def available_image_tools() -> dict[str, Callable[..., dict[str, Any]]]:
     """Return supported third-party image tool connectors."""
@@ -32,9 +34,9 @@ def available_image_tools() -> dict[str, Callable[..., dict[str, Any]]]:
     }
 
 
-# ----------------------------
+# =============================================================================
 # Azure OpenAI (DALL·E 3) call
-# ----------------------------
+# =============================================================================
 
 def _call_azure_dalle(
     *,
@@ -63,7 +65,7 @@ def _call_azure_dalle(
     url = f"{endpoint}/openai/deployments/{deployment}/images/generations?api-version={api_version}"
     headers = {"api-key": api_key, "Content-Type": "application/json"}
     body = {
-        "prompt": prompt[:4000],
+        "prompt": (prompt or "")[:DALLE_PROMPT_MAX_CHARS],
         "size": size,
         "n": 1,
         "quality": quality,
@@ -173,7 +175,7 @@ def connect_openai_images(*, prompt: str, output_formats: list[str], options: di
     elif api_response:
         api_error = "Azure image response returned no data items."
 
-    # Simulated fallback
+    # Simulated fallback (kept deterministic-ish for pipeline)
     return {
         "provider": "openai",
         "status": "simulated",
@@ -184,16 +186,16 @@ def connect_openai_images(*, prompt: str, output_formats: list[str], options: di
             {
                 "format": ext,
                 "mime_type": f"image/{'jpeg' if ext == 'jpg' else ext}",
-                "uri": f"openai://generated/{ext}/image-1",
+                "uri": f"azure_openai://generated/{ext}/image-1",
             }
             for ext in output_formats
         ],
     }
 
 
-# ----------------------------
+# =============================================================================
 # Format recipes (STRICT)
-# ----------------------------
+# =============================================================================
 
 @dataclass(frozen=True)
 class FormatRecipe:
@@ -210,52 +212,48 @@ class FormatRecipe:
 
 
 FORMAT_RECIPES: dict[str, FormatRecipe] = {
-    # Square social post
     "post_image": FormatRecipe(
         size="1024x1024",
         style="vivid",
         prompt_hint=(
-            "Format intent: square social post. Balanced composition with clean negative space for optional caption. "
-            "Keep the subject clear and uncluttered."
+            "square social post; balanced composition with clean negative space for optional caption; "
+            "subject clear and uncluttered"
         ),
         export_format="png",
         resize_mode="cover",
         sharpen="light",
         denoise="light",
     ),
-    # Wide, punchy thumbnail
     "thumbnail": FormatRecipe(
         size="1792x1024",
         style="vivid",
         prompt_hint=(
-            "Format intent: thumbnail. Strong subject clarity, close framing, high separation from background. "
-            "Reserve clear negative space for a headline overlay; avoid tiny details and busy backgrounds."
+            "thumbnail; strong subject clarity, close framing, high separation from background; "
+            "reserve clear negative space for headline overlay; avoid tiny details/busy backgrounds"
         ),
         export_format="jpeg",
         resize_mode="crop",
         sharpen="medium",
         denoise="light",
     ),
-    # Tall cover (your earlier defaults used portrait for cover)
     "cover": FormatRecipe(
         size="1024x1792",
         style="natural",
         prompt_hint=(
-            "Format intent: cover. Portrait composition with calm, premium framing. "
-            "Preserve safe areas; keep background minimal and avoid clutter near edges."
+            "cover; portrait composition with calm premium framing; preserve safe areas; "
+            "background minimal, avoid clutter near edges"
         ),
         export_format="webp",
         resize_mode="cover",
         sharpen="light",
         denoise="light",
     ),
-    # Wide banner
     "banner": FormatRecipe(
         size="1792x1024",
         style="natural",
         prompt_hint=(
-            "Format intent: banner. Wide layout emphasizing clean negative space (preferably on the right) "
-            "for optional text/logo. Keep background plain to simple."
+            "banner; wide layout emphasizing clean negative space (preferably right) for optional text/logo; "
+            "background plain and simple"
         ),
         export_format="png",
         resize_mode="contain",
@@ -265,9 +263,9 @@ FORMAT_RECIPES: dict[str, FormatRecipe] = {
 }
 
 
-# ----------------------------
+# =============================================================================
 # Builder
-# ----------------------------
+# =============================================================================
 
 class ImageGenerationBuilder:
     kind = "image"
@@ -278,12 +276,15 @@ class ImageGenerationBuilder:
     @staticmethod
     def _image_style_settings(ctx: PipelineContext) -> dict[str, Any]:
         """
-        Expected user-facing CommonStyleSettings (model-agnostic), e.g.:
-          theme, subject_prompt, avoid,
-          medium, texture,
-          palette_mode, brand_colors,
-          mood, focus_negative_space,
-          output_fidelity (standard|hd)
+        Expected user-facing ImageStyleSettings (model-agnostic), commonly:
+          theme, subject_prompt/subject/core_prompt,
+          avoid,
+          medium/visual_medium, texture,
+          palette_mode/color_palette/color_pallete, brand_colors,
+          mood,
+          composition/focus/focus_negative_space,
+          output_fidelity (standard|hd),
+          output_formats
         """
         if isinstance(ctx.style_settings, dict) and ctx.style_settings:
             return dict(ctx.style_settings)
@@ -320,111 +321,194 @@ class ImageGenerationBuilder:
     def _map_output_fidelity_to_quality(style_settings: dict[str, Any]) -> str:
         """
         DALL·E 3 quality: standard|hd
-        User: output_fidelity: Standard|HD (case-insensitive)
+        User: output_fidelity: standard|hd (case-insensitive)
         """
         fidelity = str(style_settings.get("output_fidelity") or "").strip().lower()
         if fidelity in {"hd", "high", "high_def", "high_definition"}:
             return "hd"
         if fidelity in {"standard", "std"}:
             return "standard"
-        # default
         return "standard"
 
-    # ---- Prompt builder (includes common style + strict format hint) ----
+    # ---- Prompt builder (precedence-first) ----
 
     @staticmethod
     def _build_prompt(ctx: PipelineContext, user_style: dict[str, Any], *, fmt: str) -> str:
+        """
+        Prompt policy:
+          - User image settings MUST take precedence (theme/subject/style/composition).
+          - Constraints appear early (to survive the 4k cap).
+          - Master content appears last as "inspiration only".
+        """
         recipe = ImageGenerationBuilder._recipe_for_format(fmt)
 
-        # Base context (content)
-        audience = ctx.target_audience if isinstance(ctx.target_audience, dict) else {}
-        segment = str(audience.get("primary_segment") or "general audience").strip()
-        tone = str(ctx.tone_preference or "professional").strip()
+        # Helpers (local)
+        def _safe(v: Any, *, max_len: int = 800) -> str:
+            return str(v or "").strip()[:max_len].strip()
 
-        base_context = (
-            f"Create a high-quality {fmt.replace('_', ' ')} image for '{ctx.topic_title}'. "
-            f"Core idea: {ctx.core_idea or 'not specified'}. "
-            f"Audience: {segment}. Tone: {tone}. "
-            f"Reference context (for grounding only): {(ctx.master_body or 'not specified')[:1200]}"
+        def _canonicalize_avoid(tag: str) -> str:
+            t = re.sub(r"\s+", " ", str(tag or "").strip().lower())
+            t = t.replace("-", " ")
+            mapping = {
+                "watermarks": "watermark",
+                "watermark": "watermark",
+                "logos": "logo",
+                "logo": "logo",
+                "ui screenshots": "ui screenshot",
+                "ui screenshot": "ui screenshot",
+                "gibberish text": "text",
+                "illegible text": "text",
+                "readable text": "text",
+                "typography": "text",
+            }
+            if t.endswith("s") and t[:-1] in {"watermark", "logo"}:
+                t = t[:-1]
+            return mapping.get(t, t)
+
+        def _short_master_context(max_len: int = 450) -> str:
+            core = _safe(getattr(ctx, "core_idea", "") or "", max_len=180)
+            body = _safe(getattr(ctx, "master_body", "") or "", max_len=2000)
+            body = re.sub(r"\s+", " ", body)
+            snippet = body[:max_len].strip()
+            parts: list[str] = []
+            if core:
+                parts.append(f"Core idea: {core}")
+            if snippet:
+                parts.append(f"Key cues: {snippet}")
+            return " | ".join(parts)[:max_len]
+
+        def _as_bool(value: Any, default: bool = True) -> bool:
+            if isinstance(value, bool):
+                return value
+            if value is None:
+                return default
+            s = str(value).strip().lower()
+            if s in {"1", "true", "yes", "y", "on"}:
+                return True
+            if s in {"0", "false", "no", "n", "off"}:
+                return False
+            return default
+
+        # Base metadata (short)
+        audience = ctx.target_audience if isinstance(ctx.target_audience, dict) else {}
+        segment = _safe(audience.get("primary_segment") or "general audience", max_len=80)
+        tone = _safe(getattr(ctx, "tone_preference", None) or "professional", max_len=40)
+
+        fmt_label = fmt.replace("_", " ").strip()
+        topic_title = _safe(getattr(ctx, "topic_title", None) or "", max_len=140) or "this topic"
+
+        # User style (primary) + aliases
+        theme = _safe(user_style.get("theme"), max_len=240)
+
+        subject_prompt = _safe(
+            user_style.get("subject_prompt")
+            or user_style.get("subject")
+            or user_style.get("core_prompt"),
+            max_len=1400,
         )
 
-        # User style (model-agnostic)
-        theme = str(user_style.get("theme") or "").strip()
-        subject_prompt = str(user_style.get("subject_prompt") or "").strip()
+        medium = _safe(user_style.get("medium") or user_style.get("visual_medium"), max_len=80)
+        texture = _safe(user_style.get("texture"), max_len=80)
 
-        # Negative intent list
-        avoid_list = user_style.get("avoid") if isinstance(user_style.get("avoid"), list) else []
-
-        medium = str(user_style.get("medium") or "").strip()
-        texture = str(user_style.get("texture") or "").strip()
-
-        palette_mode = str(user_style.get("palette_mode") or "").strip()
+        palette_mode = _safe(
+            user_style.get("palette_mode")
+            or user_style.get("color_palette")
+            or user_style.get("color_pallete"),
+            max_len=40,
+        )
         brand_colors = user_style.get("brand_colors") if isinstance(user_style.get("brand_colors"), dict) else {}
 
-        mood = str(user_style.get("mood") or "").strip()
-        focus = str(user_style.get("focus_negative_space") or "").strip()
+        mood = _safe(user_style.get("mood"), max_len=60)
+        composition = _safe(
+            user_style.get("composition")
+            or user_style.get("focus")
+            or user_style.get("focus_negative_space"),
+            max_len=80,
+        )
+        include_master_content = _as_bool(user_style.get("include_master_content"), default=True)
 
-        # Compose prompt blocks
-        style_lines: list[str] = []
-        style_lines.append(recipe.prompt_hint)
+        if not subject_prompt:
+            subject_prompt = _safe(
+                getattr(ctx, "core_idea", None)
+                or getattr(ctx, "topic_title", None)
+                or "a clear main subject",
+                max_len=300,
+            )
 
-        # High signal creative direction
+        # Avoid (canonicalize + dedupe)
+        avoid_list = user_style.get("avoid") if isinstance(user_style.get("avoid"), list) else []
+        default_avoid = ["watermarks", "logos", "gibberish text", "illegible text", "distorted hands", "extra fingers"]
+
+        raw_avoid = default_avoid + [str(x).strip() for x in avoid_list if str(x).strip()]
+        seen: set[str] = set()
+        avoid_dedup: list[str] = []
+        for a in raw_avoid:
+            key = _canonicalize_avoid(a)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            if key == "watermark":
+                avoid_dedup.append("watermarks")
+            elif key == "logo":
+                avoid_dedup.append("logos")
+            elif key == "ui screenshot":
+                avoid_dedup.append("ui screenshots")
+            elif key == "text":
+                avoid_dedup.append("readable text")
+            else:
+                avoid_dedup.append(a)
+
+        # Compose prompt with precedence
+        primary: list[str] = [
+            f"FORMAT INTENT: {recipe.prompt_hint}",
+            "PRIORITY: Follow the visual brief below strictly. Use reference context only if it does not conflict.",
+            f"OUTPUT: single {fmt_label} image for '{topic_title}'. Audience: {segment}. Tone: {tone}.",
+        ]
         if theme:
-            style_lines.append(f"Theme: {theme}.")
-        if subject_prompt:
-            style_lines.append(f"Subject description: {subject_prompt}")
+            primary.append(f"Visual motif/theme: {theme}.")
+        primary.append(f"SUBJECT (most important): {subject_prompt}")
+        if composition:
+            primary.append(f"COMPOSITION: {composition}.")
 
-        # Visual style
+        if fmt == "thumbnail":
+            primary.append("Thumbnail rule: one hero subject, large and readable; strong separation from background; avoid small details.")
+        elif fmt == "cover":
+            primary.append("Cover rule: keep key subject details within a central safe area (leave ~10% margin from edges).")
+        elif fmt == "banner":
+            primary.append("Banner rule: reserve clean negative space on the right for optional text/logo; if conflict, prioritize this over other composition preferences.")
+
+        style_lines: list[str] = []
         if medium:
-            style_lines.append(f"Visual medium: {medium}.")
+            style_lines.append(f"Medium: {medium}.")
         if texture:
             style_lines.append(f"Texture: {texture}.")
-
-        # Color
         if palette_mode:
-            style_lines.append(f"Color palette mode: {palette_mode}.")
+            style_lines.append(f"Palette mode: {palette_mode}.")
             if palette_mode == "brand" and brand_colors:
                 color_parts = [f"{k}={v}" for k, v in brand_colors.items() if str(v).strip()]
                 if color_parts:
-                    style_lines.append(f"Use brand colors: {', '.join(color_parts)}.")
-
-        # Mood
+                    style_lines.append(f"Brand colors: {', '.join(color_parts)}.")
         if mood:
             style_lines.append(f"Mood: {mood}.")
 
-        # Composition
-        if focus:
-            style_lines.append(f"Composition focus: {focus}.")
-
-        # Negatives (always include some common ones even if user didn't provide)
-        default_avoid = [
-            "watermarks",
-            "gibberish text",
-            "illegible text",
-            "distorted hands",
-            "extra fingers",
+        constraints: list[str] = [
+            "Do NOT generate readable text, typography, logos, or watermarks.",
         ]
-        avoid_items = []
-        avoid_items.extend([x for x in default_avoid if isinstance(x, str) and x.strip()])
-        avoid_items.extend([str(x).strip() for x in avoid_list if str(x).strip()])
+        if avoid_dedup:
+            constraints.append("Avoid / do not include: " + ", ".join(avoid_dedup) + ".")
 
-        # De-dup
-        seen = set()
-        avoid_items_dedup = []
-        for a in avoid_items:
-            key = a.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            avoid_items_dedup.append(a)
+        reference = _short_master_context(max_len=450) if include_master_content else ""
+        reference_block = f"REFERENCE CONTEXT (lowest priority, inspiration only): {reference}" if reference else ""
 
-        if avoid_items_dedup:
-            style_lines.append(f"Avoid / do not include: {', '.join(avoid_items_dedup)}.")
+        blocks = [
+            "PRIMARY VISUAL BRIEF:\n" + "\n".join(primary),
+            "VISUAL STYLE:\n" + ("\n".join(style_lines) if style_lines else "Use a coherent style consistent with the brief."),
+            "CONSTRAINTS:\n" + "\n".join(constraints),
+        ]
+        if reference_block:
+            blocks.append(reference_block)
 
-        # Guardrails: request no text rendering (you’ll overlay text later)
-        style_lines.append("Do not generate any readable text or typography in the image.")
-
-        return f"{base_context}\n\nCreative direction and constraints:\n" + "\n".join(style_lines)
+        return "\n\n".join(blocks)
 
     # ---- Connector selection ----
 
@@ -438,6 +522,30 @@ class ImageGenerationBuilder:
             raise ValueError(f"Unsupported image tool '{tool_name}'. Supported tools: {valid}")
         return tool_name, connector
 
+    # ---- Normalized settings snapshot ----
+
+    @staticmethod
+    def _normalized_image_style_snapshot(user_style: dict[str, Any]) -> dict[str, Any]:
+        """
+        Persist a compact snapshot of *effective* user inputs (including aliases).
+        This improves reproducibility/debugging and prevents losing fields when UI evolves.
+        """
+        snap: dict[str, Any] = {
+            "theme": user_style.get("theme"),
+            "subject_prompt": user_style.get("subject_prompt") or user_style.get("subject") or user_style.get("core_prompt"),
+            "avoid": user_style.get("avoid"),
+            "medium": user_style.get("medium") or user_style.get("visual_medium"),
+            "texture": user_style.get("texture"),
+            "palette_mode": user_style.get("palette_mode") or user_style.get("color_palette") or user_style.get("color_pallete"),
+            "brand_colors": user_style.get("brand_colors"),
+            "mood": user_style.get("mood"),
+            "composition": user_style.get("composition") or user_style.get("focus") or user_style.get("focus_negative_space"),
+            "output_fidelity": user_style.get("output_fidelity"),
+            "include_master_content": user_style.get("include_master_content"),
+        }
+        # drop empties
+        return {k: v for k, v in snap.items() if v not in (None, "", [], {})}
+
     # ---- Public API ----
 
     def build(self, *, fmt: str, ctx: PipelineContext) -> ArtifactDraft:
@@ -446,53 +554,48 @@ class ImageGenerationBuilder:
 
         recipe = self._recipe_for_format(fmt)
 
-        # User-provided common style settings
+        # User style settings
         user_style = self._image_style_settings(ctx)
 
-        # Strict per-format controls (do NOT let user override these via style settings)
+        # Strict per-format controls (user cannot override)
         strict_controls: dict[str, Any] = {
             "artifact_format": fmt,
             "tool_name": "openai",
             "size": recipe.size,
-            "style": recipe.style,  # vivid/natural (DALL·E 3)
+            "style": recipe.style,  # vivid/natural
             "quality": self._map_output_fidelity_to_quality(user_style),  # standard/hd
-            # pipeline defaults:
+            # pipeline defaults
             "export_format": recipe.export_format,
             "resize_mode": recipe.resize_mode,
             "sharpen": recipe.sharpen,
             "denoise": recipe.denoise,
         }
 
-        # Output formats can be user-configurable (e.g., png/webp) but default from recipe.export_format
+        # Output formats (user-configurable) defaulting to recipe.export_format
         output_formats = self._normalize_output_formats(user_style.get("output_formats") or [recipe.export_format])
 
-        # Build final prompt (includes format prompt hint + user style)
+        # Build prompt
         prompt = self._build_prompt(ctx, user_style, fmt=fmt)
 
-        # Options passed to connector: merge user_style + strict_controls with strict taking precedence
+        # Options passed to connector
         options = dict(user_style)
         options.update(strict_controls)
 
         # Required metadata for storage
-        options.setdefault("project_id", ctx.project_id)
-        options.setdefault("user_id", ctx.user_id)
-        options.setdefault("topic_title", ctx.topic_title)
+        options.setdefault("project_id", getattr(ctx, "project_id", "") or "")
+        options.setdefault("user_id", getattr(ctx, "user_id", "") or "")
+        options.setdefault("topic_title", getattr(ctx, "topic_title", "") or "")
 
         tool_name, connector = self._resolve_connector(options)
         tool_response = connector(prompt=prompt, output_formats=output_formats, options=options)
 
-        # Build payload
+        # Payload
         payload = default_payload_template()
         payload["body"] = None
         payload["assets"] = tool_response.get("images", [])
         payload["prompts"] = [
-            {
-                "name": "image_prompt",
-                "text": prompt,
-                "tool": tool_response.get("provider", tool_name),
-            }
+            {"name": "image_prompt", "text": prompt, "tool": tool_response.get("provider", tool_name)}
         ]
-
         payload["settings"] = {
             "artifact_format": fmt,
             "tool_name": tool_name,
@@ -509,33 +612,18 @@ class ImageGenerationBuilder:
             "status": tool_response.get("status", "simulated"),
         }
 
-        # Store a compact snapshot of user-facing style settings for reproducibility/debugging
-        image_style_for_settings: dict[str, Any] = {}
-        for key in (
-            "theme",
-            "subject_prompt",
-            "avoid",
-            "medium",
-            "texture",
-            "palette_mode",
-            "brand_colors",
-            "mood",
-            "focus_negative_space",
-            "output_fidelity",
-        ):
-            if key in user_style:
-                image_style_for_settings[key] = user_style.get(key)
-
-        if image_style_for_settings:
-            payload["settings"]["image_style"] = image_style_for_settings
+        # Persist normalized user style snapshot
+        image_style_snapshot = self._normalized_image_style_snapshot(user_style)
+        if image_style_snapshot:
+            payload["settings"]["image_style"] = image_style_snapshot
 
         if tool_response.get("error_message"):
             payload["settings"]["error_message"] = str(tool_response.get("error_message"))
 
-        payload["notes"] = "Image generation produced via selected third-party connector with strict per-format controls."
+        payload["notes"] = "Image generation produced via selected connector with strict per-format controls."
 
-        tags = [x for x in ctx.seed_keywords if isinstance(x, str) and x.strip()]
-        title = f"{ctx.topic_title} - {fmt.replace('_', ' ').title()}"
+        tags = [x for x in (ctx.seed_keywords or []) if isinstance(x, str) and x.strip()]
+        title = f"{getattr(ctx, 'topic_title', '')} - {fmt.replace('_', ' ').title()}".strip(" -")
         draft_status = str(tool_response.get("status") or "generated").strip().lower() or "generated"
         return ArtifactDraft(format=fmt, title=title, payload_json=payload, tags_json=tags, status=draft_status)
 

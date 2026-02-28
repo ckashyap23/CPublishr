@@ -38,6 +38,7 @@ class PipelineContext:
     tone_nuance: dict[str, Any] = field(default_factory=dict)
     style_context: dict[str, Any] = field(default_factory=dict)
     image_style_settings: dict[str, Any] = field(default_factory=dict)
+    video_style_settings: dict[str, Any] = field(default_factory=dict)
     format_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 

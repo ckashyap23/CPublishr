@@ -108,6 +108,103 @@ class ArtifactPipelineOrchestrator:
         return out
 
     @staticmethod
+    def _normalize_video_kind_settings(style_settings: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(style_settings, dict):
+            return {}
+
+        out: dict[str, Any] = {}
+
+        def clean_text(key: str, max_len: int = 5000) -> None:
+            raw = style_settings.get(key)
+            if raw is None:
+                return
+            value = str(raw).strip()
+            if value:
+                out[key] = value[:max_len]
+
+        def clean_enum(key: str, allowed: set[str]) -> None:
+            raw = style_settings.get(key)
+            if raw is None:
+                return
+            value = str(raw).strip().lower()
+            if value in allowed:
+                out[key] = value
+
+        clean_text("theme", 240)
+        clean_text("subject_prompt", 4000)
+
+        raw_avoid = style_settings.get("avoid")
+        if isinstance(raw_avoid, list):
+            avoid_out: list[str] = []
+            seen: set[str] = set()
+            for item in raw_avoid:
+                tag = str(item or "").strip()
+                if not tag:
+                    continue
+                key = tag.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                avoid_out.append(tag[:80])
+            if avoid_out:
+                out["avoid"] = avoid_out
+
+        clean_enum(
+            "mood",
+            {
+                "playful",
+                "serious",
+                "premium",
+                "cozy",
+                "dramatic",
+                "energetic",
+                "inspiring",
+                "suspenseful",
+                "mysterious",
+                "whimsical",
+                "futuristic",
+                "nostalgic",
+            },
+        )
+        clean_enum(
+            "lighting",
+            {
+                "soft_daylight",
+                "golden_hour",
+                "sunset_warm",
+                "overcast_diffused",
+                "studio_softbox",
+                "high_key_bright",
+                "low_key_moody",
+                "neon_night",
+                "backlit_silhouette",
+                "rim_light",
+                "volumetric_godrays",
+                "dramatic_spotlight",
+            },
+        )
+        clean_enum(
+            "palette_mode",
+            {"brand", "monochrome", "pastel", "neon", "earthy", "muted", "high_contrast"},
+        )
+        clean_enum("output_fidelity", {"standard", "pro"})
+
+        raw_brand_colors = style_settings.get("brand_colors")
+        if isinstance(raw_brand_colors, dict):
+            colors: dict[str, str] = {}
+            for key in ("primary", "secondary", "accent", "background"):
+                raw = raw_brand_colors.get(key)
+                if raw is None:
+                    continue
+                color = str(raw).strip()
+                if color and len(color) <= 16:
+                    colors[key] = color
+            if colors:
+                out["brand_colors"] = colors
+
+        return out
+
+    @staticmethod
     def _merge_tags(seed_keywords: list[str], payload: dict[str, Any], existing: list[str] | None = None) -> list[str]:
         acc: list[str] = []
         for source in [seed_keywords, payload.get("keywords") or [], existing or []]:
@@ -254,6 +351,8 @@ class ArtifactPipelineOrchestrator:
                 continue
             if kind_key == "image":
                 out[kind_key] = ArtifactPipelineOrchestrator._normalize_image_kind_settings(value)
+            elif kind_key in {"video", "gif"}:
+                out[kind_key] = ArtifactPipelineOrchestrator._normalize_video_kind_settings(value)
             else:
                 out[kind_key] = dict(value)
         return out
@@ -285,6 +384,7 @@ class ArtifactPipelineOrchestrator:
         normalized_format_overrides = self._normalize_format_overrides(style_settings_by_format)
         text_style_settings = normalized_style_settings_by_kind.get("text") or {}
         image_style_settings = normalized_style_settings_by_kind.get("image") or {}
+        video_style_settings = normalized_style_settings_by_kind.get("video") or {}
 
         return PipelineContext(
             user_id=self.user_id,
@@ -308,6 +408,7 @@ class ArtifactPipelineOrchestrator:
             tone_nuance=self._normalize_tone_nuance(text_style_settings),
             style_context=self._normalize_style_context(text_style_settings),
             image_style_settings=image_style_settings,
+            video_style_settings=video_style_settings,
             format_overrides=normalized_format_overrides,
         )
 
@@ -392,8 +493,9 @@ class ArtifactPipelineOrchestrator:
                 ),
             )
             draft = builder.build(fmt=fmt, ctx=fmt_ctx)
-            if str(getattr(builder, "kind", "")).strip() == "image" and str(draft.status or "").strip().lower() != "generated":
-                # Do not persist failed/simulated image artifacts.
+            builder_kind = str(getattr(builder, "kind", "")).strip()
+            if builder_kind in {"image", "video", "gif"} and str(draft.status or "").strip().lower() != "generated":
+                # Do not persist failed/partial/simulated media artifacts.
                 continue
             persisted.append(self._persist_draft(project_id=project_id, draft=draft, revision_mode=opts.revision_mode))
 

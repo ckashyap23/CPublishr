@@ -69,6 +69,9 @@ Publishing:
 - `GET /api/v1/publishing/platforms`
 - `GET /api/v1/publishing/platforms/{platform}/fields`
 - `POST /api/v1/publishing/jobs/artifacts`
+- `POST /api/v1/publishing/save-to-publish`
+- `GET /api/v1/publishing/output-path/browse`
+- `POST /api/v1/publishing/output-path/pick-local`
 
 ## 3. Core Data Model
 
@@ -179,13 +182,17 @@ The UI supports:
 - save-time version naming (prompt on save click)
 - artifact generation by kind/format multi-select
 - kind-scoped + format-scoped artifact style settings (`style_settings_by_kind`, `style_settings_by_format`)
+- image/video style include-master-context toggle (`include_master_content`)
+- video format generation (`gif`, `reel`, `short_video`)
 - generated artifact view as per-artifact tabs
 - stored artifact retrieval view (shown as a separate artifacts sub-view)
 - inline artifact title rename in stored artifacts view
-- Publish stage with dynamic platform list + adapter field mapping UI (`Publish` button intentionally disabled until adapter publish implementation is finalized)
+- Publish stage with dynamic platform list + adapter field mapping UI
+- Save-to-Publish flow with name + output location input and backend-assisted local folder picker
 
 ## 8. Important Operational Notes
 
 - Startup now relies on SQLAlchemy model metadata only (`create_all()`); legacy compatibility patching has been removed.
 - Full integration tests are currently Postgres/.env-dependent by design.
 - `backend/.env` contains secrets and is now ignored by `.gitignore`; do not commit real credentials.
+- For media artifacts (`image`, `video`, `gif`), orchestrator persists only drafts with `status="generated"`.

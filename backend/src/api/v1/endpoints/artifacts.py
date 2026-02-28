@@ -1,28 +1,89 @@
 import logging
+from typing import Any
+from urllib.parse import urlparse, parse_qs
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_current_user_id, get_db
 from src.contracts.prd import ArtifactEntity, ArtifactFormat, ArtifactKind, ArtifactListResponse
+from src.core.config import settings
 from src.db.repositories.artifact_repository import ArtifactRepository
 from src.schemas.artifacts import ArtifactGenerationRequest, ArtifactGenerationResponse, ArtifactTitleUpdateRequest
 from src.services.orchestration.artifact_schema import formats_by_kind_map
 from src.services.orchestration.artifacts.contracts import GenerationOptions
 from src.services.orchestration.artifacts.orchestrator import ArtifactPipelineOrchestrator
+from src.services.storage.artifact_blob_storage import generate_read_url
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _refresh_sas_urls_in_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Refresh expired SAS URLs in payload_json assets by regenerating them from blob_path."""
+    if not isinstance(payload, dict):
+        return payload
+    
+    payload = dict(payload)  # Make a copy
+    assets = payload.get("assets", [])
+    if not isinstance(assets, list):
+        return payload
+    
+    container = settings.azure_artifacts_container or "artifacts"
+    refreshed_assets = []
+    
+    for asset in assets:
+        if not isinstance(asset, dict):
+            refreshed_assets.append(asset)
+            continue
+        
+        asset = dict(asset)  # Make a copy
+        blob_path = asset.get("blob_path")
+        uri = asset.get("uri", "")
+        
+        # If we have a blob_path, try to regenerate the SAS URL
+        if blob_path and isinstance(blob_path, str) and blob_path.strip():
+            new_uri = generate_read_url(container, blob_path.strip())
+            if new_uri:
+                asset["uri"] = new_uri
+                logger.debug("Refreshed SAS URL for blob_path=%s", blob_path)
+        # If no blob_path but we have a URI that looks like Azure Blob Storage, try to extract path
+        elif uri and "blob.core.windows.net" in uri:
+            try:
+                parsed = urlparse(uri)
+                # Extract blob path from URL: https://account.blob.core.windows.net/container/path/to/file
+                # Remove query string (SAS token) first
+                path_without_query = parsed.path
+                path_parts = path_without_query.strip("/").split("/", 1)  # ['container', 'path/to/file']
+                if len(path_parts) >= 2:
+                    container_name = path_parts[0]
+                    blob_path = path_parts[1]
+                    new_uri = generate_read_url(container_name, blob_path)
+                    if new_uri:
+                        asset["uri"] = new_uri
+                        asset["blob_path"] = blob_path  # Store for future refreshes
+                        logger.debug("Refreshed SAS URL by extracting blob_path from URI: %s", blob_path)
+            except Exception as e:
+                logger.debug("Could not extract blob_path from URI %s: %s", uri[:100], e)
+        
+        refreshed_assets.append(asset)
+    
+    payload["assets"] = refreshed_assets
+    return payload
+
+
 def _to_entity(a) -> ArtifactEntity:
+    payload = a.payload_json or {}
+    # Refresh SAS URLs in assets before returning
+    payload = _refresh_sas_urls_in_payload(payload)
+    
     return ArtifactEntity(
         artifact_id=a.artifact_id,
         project_id=a.project_id,
         format=a.format,
         kind=a.kind,
         title=a.title,
-        payload_json=a.payload_json or {},
+        payload_json=payload,
         tags_json=a.tags_json or [],
         status=a.status,
         revision=a.revision,

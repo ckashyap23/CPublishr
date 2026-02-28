@@ -1,86 +1,44 @@
 # Generate Adapter (Publish Platform Adapter Guide)
 
-This guide explains how to add a new publish-platform adapter for the `Publish` workflow stage.
+This guide describes how to add a new platform adapter for the `Publish` stage.
+For runtime behavior, endpoint details, and save-to-publish flow, refer to `docs/teamwork/Publishing.md`.
 
-## Where to add the adapter
+## Location and discovery
 
-Create a new file under:
-- `backend/src/platforms/adapters/`
+Add file:
+- `backend/src/platforms/adapters/<platform>.py`
 
-Example:
-- `backend/src/platforms/adapters/x.py`
-
-The adapter registry auto-discovers modules in this folder that export `ADAPTER`.
+Registry:
+- `backend/src/platforms/adapters/registry.py` auto-discovers modules exporting `ADAPTER`.
 
 ## Required adapter methods
 
-Your adapter must expose a module-level `ADAPTER` instance with these methods:
+Each adapter must implement:
 - `get_field_schema() -> dict`
 - `build_platform_payload(*, field_mapping: dict[str, list[dict]]) -> dict`
 - `publish(*, payload: dict) -> dict`
 
-Minimal shape:
+Optional but recommended:
+- `save_to_publish_bundle(*, payload: dict, output_root: str, relative_path: str) -> dict`
 
-```python
-from __future__ import annotations
-from typing import Any
+If `save_to_publish_bundle` exists, `POST /api/v1/publishing/save-to-publish` delegates final output assembly and file writing to the adapter.
 
+## Field schema contract
 
-class XAdapter:
-    platform_name = "x"
+Returned by `get_field_schema()` and used by UI mapping page.
 
-    def get_field_schema(self) -> dict[str, Any]:
-        return {
-            "platform": self.platform_name,
-            "fields": [
-                {
-                    "field_key": "body",
-                    "label": "Post Body",
-                    "required": True,
-                    "allows_multiple": True,
-                    "accepted_artifact_formats": ["post"],
-                    "description": "Main post body text.",
-                    "suggested_parts": ["body", "tags_json", "title"],
-                }
-            ],
-        }
+Per field include:
+- `field_key`
+- `label`
+- `required`
+- `allows_multiple`
+- `accepted_artifact_formats`
+- `description`
+- `suggested_parts`
 
-    def build_platform_payload(self, *, field_mapping: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
-        return {"platform": self.platform_name, "payload_preview": field_mapping}
+## Mapping contract passed to adapter
 
-    def publish(self, *, payload: dict[str, Any]) -> dict[str, Any]:
-        return {"status": "published", "external_id": "placeholder", "external_url": None, "payload": payload}
-
-
-ADAPTER = XAdapter()
-```
-
-## Field schema (drives the UI)
-
-`get_field_schema()` is used by:
-- `GET /api/v1/publishing/platforms/{platform}/fields`
-- React `Publish` UI mapping screen
-
-Each field object should define:
-- `field_key` (stable key used in request payload)
-- `label` (UI label)
-- `required` (`true/false`)
-- `allows_multiple` (`true/false`) for source rows
-- `accepted_artifact_formats` (artifact formats allowed for this field)
-- `description` (short UI help text)
-- `suggested_parts` (optional; hints such as `body`, `tags_json`, `items`, `assets`)
-
-## Mapping contract (what `build_platform_payload` receives)
-
-The publish API sends `field_mappings` as `sources[]`.
-
-Each source row includes:
-- `artifact_id`
-- `part`
-- `render_as` (optional adapter hint)
-- `order`
-
-The publish service resolves artifacts and passes adapters:
+Publishing service resolves mappings into artifact-aware sources and passes:
 
 ```json
 {
@@ -104,33 +62,35 @@ The publish service resolves artifacts and passes adapters:
 
 ## Where composition logic should live
 
-Platform-specific combining logic belongs in the adapter:
-- combine `post.body + tags_json` for LinkedIn
-- combine `caption.body + cta_variants.items` for Instagram
-- convert tags to hashtag line/block based on `render_as`
+Keep it in adapters, not UI:
+- join text parts (body/items/tags) for platform text fields
+- choose and normalize media assets
+- convert tags to platform-specific hashtag shape
 
-Do not push platform composition logic into the UI.
+UI should only collect mappings.
 
-## Current publish flow (backend)
+## Current implementation notes (brief)
 
-1. UI loads platform list (`/api/v1/publishing/platforms`)
-2. UI loads field schema (`/api/v1/publishing/platforms/{platform}/fields`)
-3. UI sends mapping (`POST /api/v1/publishing/jobs/artifacts`)
-4. `PublishingService` validates + resolves artifacts
-5. Adapter builds platform payload
-6. Adapter `publish()` is called
-7. `publish_jobs` row is created with `publish_job_id`
+- `linkedin.py`: schema + composition + save-to-publish bundle; publish path intentionally disabled.
+- `instagram.py`: schema + composition + save-to-publish bundle; publish remains placeholder.
 
-## Checklist when adding a new adapter
+## Validation handled by service (before adapter)
 
-1. Create `backend/src/platforms/adapters/<platform>.py`
-2. Export `ADAPTER`
-3. Implement `get_field_schema()`
-4. Implement `build_platform_payload()` using source-part mappings
-5. Implement placeholder `publish()` first (real API later)
-6. Restart backend
-7. Verify:
-   - `GET /api/v1/publishing/platforms` lists your platform
-   - `GET /api/v1/publishing/platforms/{platform}/fields` returns your schema
-   - Platform appears in UI `Publish` page dropdown
-   - Field mapping UI loads and payload preview looks correct
+`PublishingService` validates:
+- field key exists in adapter schema
+- required fields are mapped
+- artifact exists in project
+- artifact format is allowed for target field
+
+## Quick checklist
+
+1. Add adapter file and export `ADAPTER`
+2. Implement schema and payload composition
+3. Add `save_to_publish_bundle` if Save-to-Publish should output files/folders
+4. Keep `publish` as placeholder or real integration
+5. Restart backend
+6. Verify:
+   - `GET /api/v1/publishing/platforms`
+   - `GET /api/v1/publishing/platforms/{platform}/fields`
+   - `POST /api/v1/publishing/save-to-publish`
+   - `POST /api/v1/publishing/jobs/artifacts`

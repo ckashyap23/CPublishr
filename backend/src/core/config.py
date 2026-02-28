@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     azure_sora_endpoint: str = ""
     azure_sora_api_key: str = ""
     azure_sora_api_version: str = "preview"
+    azure_sora_deployment_name: str = ""  # e.g., "sora-preview"
 
     # Azure Blob storage for voice profile dataset ingestion
     azure_storage_connection_string: str = ""
@@ -49,6 +50,18 @@ class Settings(BaseSettings):
     azure_artifacts_blob_prefix: str = "artifacts"
     azure_artifacts_public_read: bool = False
     azure_artifacts_sas_ttl_minutes: int = 60
+
+    # LinkedIn publishing (member/org post create via REST APIs)
+    linkedin_access_token: str = ""
+    linkedin_author_urn: str = ""  # e.g. urn:li:person:* or urn:li:organization:*
+    linkedin_api_version: str = "202602"
+    linkedin_http_timeout_seconds: int = 60
+
+    # Save-to-publish destination root. Examples:
+    # - Local: C:/temp/output or /tmp/output
+    # - Azure Blob: azure://<container>/<prefix>
+    # - GCS: gs://<bucket>/<prefix>
+    output_path: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

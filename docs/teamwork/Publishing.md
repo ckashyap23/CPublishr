@@ -53,6 +53,12 @@ Publishing endpoints:
   - returns adapter-defined field schema for UI mapping
 - `POST /api/v1/publishing/jobs/artifacts`
   - creates a publish job using mapped artifacts + adapter payload composition
+- `POST /api/v1/publishing/save-to-publish`
+  - saves mapped platform payload as files/folder bundle via adapter output logic
+- `GET /api/v1/publishing/output-path/browse`
+  - backend-host filesystem browser helper for UI
+- `POST /api/v1/publishing/output-path/pick-local`
+  - opens native folder picker on backend host machine and returns selected path
 - `POST /api/v1/publishing/jobs`
   - legacy stub path using `platform_outputs` (kept for compatibility)
 
@@ -110,6 +116,14 @@ Artifact-mapped job path (`create_artifact_publish_job`) currently:
 8. Persists a publish job row with `publish_job_id` and payload snapshot
 9. Returns `ArtifactPublishJobResponse`
 
+`save_to_publish` path:
+1. Validates platform/project/user_name/output path
+2. Resolves mappings exactly like publish flow
+3. Calls adapter `build_platform_payload(...)`
+4. Calls adapter `save_to_publish_bundle(...)` when present
+5. Persists `publish_jobs` row with status `saved` and output snapshot
+6. Returns saved output location
+
 ## `publish_job_id` and job tracking (current + future)
 
 Current:
@@ -148,17 +162,39 @@ They should not own:
 - scheduling orchestration
 - retry policy
 
+## Output path behavior
+
+Output root can be:
+- local filesystem path or `file://` path
+- `azure://<container>/<prefix>` (or `az://...`)
+- `gs://<bucket>/<prefix>`
+
+Folder structure used by save-to-publish:
+- `Publishr/<user_id>/<project_id>/<platform>_<user_name>`
+
+Adapters write final files under this relative path.
+
+### Output-related config
+
+- `OUTPUT_PATH` (optional fallback when UI does not send output path)
+- `AZURE_STORAGE_CONNECTION_STRING` (required for `azure://` or `az://`)
+- Google credentials must be available in runtime environment for `gs://` (via standard GCP auth chain)
+
+### Local picker caveat
+
+`POST /api/v1/publishing/output-path/pick-local` opens a native folder picker on the backend host machine.
+In remote deployments, this is not the end-user device file system.
+
 ## UI status (current)
 
-React UI (`ui/react/src/App.jsx`) includes a `Publish` workflow page that can:
-- load platforms dynamically
-- load platform field schema
-- load project artifacts
-- build source-level mappings
-- preview the payload
+React UI (`ui/react/src/App.jsx`) includes a `Publish` page that can:
+- load dynamic platform list + field schema
+- map artifact sources to platform fields
+- trigger `Save to Publish` (name + output location)
+- call native folder picker via backend endpoint for local path selection
 
 Current limitation:
-- Final `Publish` button is intentionally disabled until adapter publish implementations are completed.
+- final publish API flow remains adapter-dependent; LinkedIn API call path is intentionally disabled in adapter while Save-to-Publish is primary.
 
 ## Operational notes
 

@@ -40,3 +40,33 @@ class ArtifactPublishJobResponse(BaseModel):
     external_url: str | None = None
     scheduled_time: str | None = None
     payload_snapshot: dict = Field(default_factory=dict)
+
+
+class SaveToPublishRequest(BaseModel):
+    project_id: str
+    platform: str
+    user_name: str
+    output_path: str | None = None
+    field_mappings: list[PublishFieldArtifactMapping] = Field(default_factory=list)
+
+
+class SaveToPublishResponse(BaseModel):
+    status: str = "saved"
+    project_id: str
+    platform: str
+    user_name: str
+    output_path: str
+
+
+class OutputPathBrowseResponse(BaseModel):
+    current_path: str
+    parent_path: str | None = None
+    directories: list[str] = Field(default_factory=list)
+
+
+class OutputPathPickRequest(BaseModel):
+    start_path: str | None = None
+
+
+class OutputPathPickResponse(BaseModel):
+    selected_path: str | None = None
