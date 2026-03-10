@@ -17,6 +17,8 @@ Current UI for project workflow (Node 0-3/editorial), artifacts, and voice-profi
    - Dynamic artifact format catalog (`GET /api/v1/artifacts/catalog/formats`)
    - Multi-select artifact generation (`POST /api/v1/artifacts/generate`)
    - Kind-scoped + per-format style settings (`style_settings_by_kind`, `style_settings_by_format`)
+   - Image style fields: theme, subject, avoid, medium, texture, lighting (12 options), palette mode, mood, composition, output fidelity
+   - Video style fields: theme, subject, avoid, mood, lighting, palette mode, output fidelity, camera motion (format default or user override), energy level (low/medium/high)
    - Stored artifacts view (`GET /api/v1/artifacts/{project_id}`)
    - Inline artifact rename in stored view (`PATCH /api/v1/artifacts/item/{artifact_id}/title`)
 4. Publish (artifact-mapped)
@@ -61,3 +63,9 @@ Set backend URL in UI (default is `http://127.0.0.1:8010`).
 - Header title is `Publishr`.
 - Artifacts page uses separate sub-views for generated vs stored artifacts (clicking `View Stored Artifacts` hides the generated panel).
 - Workflow tabs now include `Publish` (Setup / Editorial / Artifacts / Publish).
+
+---
+
+## Backend Update Reference
+
+Backend-side implemented changes (UI excluded) are tracked in [../../BACKEND_CHANGES.md](../../BACKEND_CHANGES.md).

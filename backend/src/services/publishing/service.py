@@ -58,6 +58,22 @@ class PublishingService:
         cleaned = [str(p).strip().strip("/") for p in parts if str(p).strip()]
         return "/".join(cleaned)
 
+    @staticmethod
+    def _validate_output_root(output_root: str) -> None:
+        raw = str(output_root or "").strip()
+        if not raw:
+            return
+        lowered = raw.lower()
+        if lowered.startswith(("azure://", "az://", "gs://", "file://")):
+            return
+        parsed = urlparse(raw)
+        scheme = str(parsed.scheme or "").strip().lower()
+        if scheme in {"http", "https"}:
+            raise ValueError(
+                "HTTP/HTTPS publish destinations are not directly writable. "
+                "Use azure://, gs://, file://, or a local absolute path."
+            )
+
     def _resolve_save_publish_path_parts(
         self, *, project_id: str, platform: str, user_name: str
     ) -> tuple[str, str, str, str]:
@@ -157,6 +173,7 @@ class PublishingService:
         output_root = str(payload.output_path or "").strip() or str(settings.output_path or "").strip()
         if not output_root:
             raise ValueError("OUTPUT_PATH is not configured. Set OUTPUT_PATH in backend/.env")
+        self._validate_output_root(output_root)
 
         _, _, _, relative = self._resolve_save_publish_path_parts(
             project_id=project_id,

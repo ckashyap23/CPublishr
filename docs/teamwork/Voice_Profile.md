@@ -178,3 +178,9 @@ Current simplifications:
   - `backend/src/db/init_db.py`
 - UI:
   - `ui/react/src/App.jsx`
+
+---
+
+## Backend Update Reference
+
+Backend-side implemented changes (UI excluded) are tracked in [../../BACKEND_CHANGES.md](../../BACKEND_CHANGES.md).

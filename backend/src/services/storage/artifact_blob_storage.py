@@ -5,6 +5,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from src.core.config import settings
 
@@ -156,3 +157,78 @@ def upload_text(
         filename=filename,
         content_type=content_type,
     )
+
+
+def overwrite_blob_text(
+    *,
+    blob_path: str,
+    text: str,
+    content_type: str = "text/plain; charset=utf-8",
+) -> dict[str, str] | None:
+    if not _artifacts_enabled():
+        return None
+    conn_str = _sanitize_connection_string(settings.azure_storage_connection_string)
+    container = (settings.azure_artifacts_container or "").strip()
+    if not conn_str or not container or not (blob_path or "").strip():
+        logger.warning("Azure artifact overwrite skipped: missing config or blob_path")
+        return None
+    try:
+        BlobServiceClient, ContentSettings, _, _ = _get_blob_sdk()
+        svc = BlobServiceClient.from_connection_string(conn_str)
+        container_client = svc.get_container_client(container)
+        blob_client = container_client.get_blob_client(blob_path.strip())
+        blob_client.upload_blob(
+            (text or "").encode("utf-8"),
+            overwrite=True,
+            content_settings=ContentSettings(content_type=content_type),
+        )
+        uri = generate_read_url(container, blob_path.strip())
+        if not uri:
+            uri = blob_client.url
+        return {"uri": uri, "blob_path": blob_path.strip()}
+    except Exception as exc:
+        logger.warning("Azure artifact overwrite failed for blob_path=%s: %s", blob_path, exc)
+        return None
+
+
+def blob_path_from_uri(uri: str) -> str | None:
+    raw = str(uri or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = urlparse(raw)
+        path = str(parsed.path or "").strip("/")
+        if not path:
+            return None
+        parts = path.split("/", 1)
+        if len(parts) < 2:
+            return None
+        return parts[1].strip() or None
+    except Exception:
+        return None
+
+
+def download_bytes(
+    *,
+    blob_path: str,
+    container: str | None = None,
+) -> bytes | None:
+    if not _artifacts_enabled():
+        return None
+    clean_blob_path = str(blob_path or "").strip()
+    if not clean_blob_path:
+        return None
+    conn_str = _sanitize_connection_string(settings.azure_storage_connection_string)
+    resolved_container = str(container or settings.azure_artifacts_container or "").strip()
+    if not conn_str or not resolved_container:
+        logger.warning("Azure artifact download skipped: missing connection string or artifacts container config")
+        return None
+    try:
+        BlobServiceClient, _, _, _ = _get_blob_sdk()
+        svc = BlobServiceClient.from_connection_string(conn_str)
+        container_client = svc.get_container_client(resolved_container)
+        blob_client = container_client.get_blob_client(clean_blob_path)
+        return blob_client.download_blob().readall()
+    except Exception as exc:
+        logger.warning("Azure artifact download failed for blob_path=%s: %s", clean_blob_path, exc)
+        return None

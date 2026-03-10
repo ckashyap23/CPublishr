@@ -95,6 +95,60 @@ UI currently sends `include_master_content` for image/video style settings.
 
 Theme and subject/core prompt are treated as mandatory in UI; video builder also enforces this at backend level.
 
+### Image style fields (`style_settings_by_kind["image"]`)
+
+| Field | Type | Notes |
+|---|---|---|
+| `theme` | free text | mandatory in UI |
+| `subject` | free text | mandatory in UI (core prompt) |
+| `avoid` | tag list | joined as negative constraint |
+| `medium` | enum | photo, illustration, 3d_render, comic, watercolor, oil_paint, vector_flat, pixel_art |
+| `texture` | enum | clean, film_grain, halftone, paper, canvas, noise |
+| `lighting` | enum | 12 options — soft_daylight, golden_hour, sunset_warm, overcast_diffused, studio_softbox, high_key_bright, low_key_moody, neon_night, backlit_silhouette, rim_light, volumetric_godrays, dramatic_spotlight |
+| `palette_mode` | enum | brand, monochrome, pastel, neon, earthy, muted, high_contrast |
+| `mood` | enum | playful, serious, premium, cozy, dramatic, energetic |
+| `composition` | enum | subject_centered, rule_of_thirds, negative_space_left, negative_space_right |
+| `output_fidelity` | toggle | standard, hd |
+| `include_master_content` | bool | appends master-content reference to prompt |
+
+All enum values are expanded to descriptive phrases via `_IMAGE_ENUM_EXPANSIONS` before prompt injection. Unknown values pass through unchanged.
+
+### Video style fields (`style_settings_by_kind["video"]`)
+
+| Field | Type | Notes |
+|---|---|---|
+| `theme` | free text | mandatory in UI |
+| `subject` | free text | mandatory in UI (core prompt) |
+| `avoid` | tag list | joined as negative constraint |
+| `mood` | enum | playful, serious, premium, cozy, dramatic, energetic, inspiring, suspenseful, mysterious, whimsical, futuristic, nostalgic |
+| `lighting` | enum | same 12 options as image |
+| `palette_mode` | enum | same 7 options as image |
+| `output_fidelity` | enum | standard, pro |
+| `camera_motion` | enum | `""` = use format default; slow_dolly_in, orbital_drift, tracking_follow, static_locked, handheld_documentary, push_pull_oscillate |
+| `energy_level` | enum | low, medium, high — maps to `(pacing, motion_intensity)` and overrides recipe composition defaults |
+| `include_master_content` | bool | appends master-content reference to prompt |
+
+All enum values are expanded to descriptive phrases via `_VIDEO_ENUM_EXPANSIONS` before prompt injection.
+
+`camera_motion` and `energy_level` override the per-format `composition_defaults` in `VideoRecipe`. When `camera_motion` is empty, the recipe default is used unchanged.
+
+### Format-specific in-prompt rules (image)
+
+These are hardcoded per format in `FORMAT_RECIPES[fmt].prompt_hint` and injected at the top of every prompt as `FORMAT INTENT:`:
+
+- `post_image`: visual anchor (emotion, contrast, implied motion); bottom ~15% caption safe zone; no flat symmetrical layouts
+- `thumbnail`: subject 60–70% of frame height; eyes in upper third if face present; warm-cool foreground/background contrast; one hero subject with clear negative space
+- `cover`: 80% safe zone (10% margin all edges); lower 20% subtle tonal darkening for title overlay; subject upper-centered
+- `banner`: subject anchored in left third with shallow DoF; panoramic feel (no tight crop); right two-thirds kept plain
+
+### Format-specific in-prompt rules (video)
+
+Injected as `FORMAT INTENT:` per format:
+
+- `gif`: cyclical loop — start and end frames must be visually identical; oscillating camera motion; prefer bold flat tones (soft bokeh and heavy gradients degrade in 256-color GIF palette)
+- `reel`: 9:16 full bleed, no letterboxing; subject in upper 65% (bottom 35% is platform UI safe zone); first 2 seconds must show motion toward camera, subject reveal, or contrast flash
+- `short_video`: full 5-segment narrative arc via `_SHORT_VIDEO_SEGMENT_ROLES` — establishing shot → development × 3 → resolution/outro; implied cuts should feel natural (match on action preferred)
+
 ## Add new format checklist
 
 1. Add `backend/src/services/orchestration/artifacts/formats/<new_format>.py`
@@ -106,3 +160,9 @@ Theme and subject/core prompt are treated as mandatory in UI; video builder also
    - `GET /api/v1/artifacts/catalog/formats`
    - UI format list
    - `POST /api/v1/artifacts/generate`
+
+---
+
+## Backend Update Reference
+
+Backend-side implemented changes (UI excluded) are tracked in [../../BACKEND_CHANGES.md](../../BACKEND_CHANGES.md).

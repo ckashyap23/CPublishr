@@ -276,3 +276,9 @@ Start with **LinkedIn + X** for pros:
 
 * Engagement lift vs baseline (self-reported or measured)
 * A/B improvement rate over time
+
+---
+
+## Backend Update Reference
+
+Backend-side implemented changes (UI excluded) are tracked in [./BACKEND_CHANGES.md](./BACKEND_CHANGES.md).

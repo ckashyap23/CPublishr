@@ -27,6 +27,7 @@ from src.services.orchestration.nodes.master_content import MasterContentNode
 from src.services.orchestration.nodes.research_trends import ResearchTrendsNode
 from src.services.orchestration.nodes.topic_initialization import TopicInitializationNode
 from src.services.orchestration.nodes.voice_profile_resolve import VoiceProfileResolveNode
+from src.services.storage.prompt_blob_storage import format_chat_prompt_text, save_prompt_text
 from src.platforms.adapters.registry import default_platform_registry
 from src.utils.ids import new_id
 
@@ -78,7 +79,12 @@ class OrchestrationEngine:
         self.projects.get_or_create(payload.project_id)
 
         run_id = new_id("run")
-        ctx = NodeExecutionContext(project_id=payload.project_id, run_id=run_id, input_payload=payload.model_dump())
+        ctx = NodeExecutionContext(
+            project_id=payload.project_id,
+            run_id=run_id,
+            input_payload=payload.model_dump(),
+            state={"user_id": self.user_id},
+        )
 
         n0 = self.node0.run(ctx)
         TopicInitializationResponse.model_validate(n0.output_payload)
@@ -193,7 +199,7 @@ class OrchestrationEngine:
             project_id=payload.project_id,
             run_id=new_id("run"),
             input_payload=payload.model_dump(),
-            state={"current_master_document": current.content},
+            state={"current_master_document": current.content, "user_id": self.user_id},
         )
         res = self.node3.run(ctx)
         validated = EditorialResponse.model_validate(res.output_payload)
@@ -267,7 +273,7 @@ class OrchestrationEngine:
             project_id=project_id,
             run_id=new_id("run"),
             input_payload=payload.model_dump(),
-            state={"current_master_document": current.content},
+            state={"current_master_document": current.content, "user_id": self.user_id},
         )
         res = EditorialResponse.model_validate(self.node3.run(ctx).output_payload)
 
@@ -297,7 +303,7 @@ class OrchestrationEngine:
             project_id=session.project_id,
             run_id=new_id("run"),
             input_payload=payload.model_dump(),
-            state={"current_master_document": session.working_content},
+            state={"current_master_document": session.working_content, "user_id": self.user_id},
         )
         res = EditorialResponse.model_validate(self.node3.run(ctx).output_payload)
 
@@ -352,14 +358,23 @@ class OrchestrationEngine:
 
         preview = source.content
         if self.llm and self.llm.enabled:
+            system_prompt = "You are a careful editorial assistant."
             prompt = (
                 "Rewrite the markdown content to align with this section order while preserving meaning and facts.\n"
                 "Return only markdown.\n\n"
                 f"Target outline: {cleaned_outline}\n\n"
                 f"Original content:\n{source.content}"
             )
+            save_prompt_text(
+                user_id=self.user_id,
+                project_id=project_id,
+                section="master-content",
+                name=f"editorial_v{self.content.next_version_number(project_id)}",
+                suffix="editorial_outline",
+                text=format_chat_prompt_text(system_prompt=system_prompt, user_prompt=prompt),
+            )
             preview = self.llm.chat(
-                system_prompt="You are a careful editorial assistant.",
+                system_prompt=system_prompt,
                 user_prompt=prompt,
                 temperature=0.3,
                 max_tokens=2500,
@@ -441,7 +456,7 @@ class OrchestrationEngine:
             project_id=project_id,
             run_id=new_id("run"),
             input_payload=payload.model_dump(),
-            state={"current_master_document": source.content},
+            state={"current_master_document": source.content, "user_id": self.user_id},
         )
         res = EditorialResponse.model_validate(self.node3.run(ctx).output_payload)
         return {

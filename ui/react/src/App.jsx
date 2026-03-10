@@ -1,8 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import publishrLogo from "./publishr_logo.png";
 
 const API_BASE_DEFAULT = "http://127.0.0.1:8010";
 
-const DEFAULT_USER_CONTENT = `When it comes to choosing a pet, the age-old debate of cats versus dogs often takes center stage. But what if we told you that cats might just be the superior choice? Let's explore why these independent furballs could rule the world of pets.
+const TOPIC_TITLE_SUGGESTION = "Cats are better than dogs";
+const CORE_IDEA_SUGGESTION = "Cats are better than dogs";
+const USER_CONTENT_SUGGESTION = `When it comes to choosing a pet, the age-old debate of cats versus dogs often takes center stage. But what if we told you that cats might just be the superior choice? Let's explore why these independent furballs could rule the world of pets.
 
 ## The Unique Qualities of Cats
 Cats are the only pets that come with built-in self-cleaning, boundary setting, and 'I chose you' energy. Unlike dogs, who love everyone like a free trial, cats love you like a premium subscription-earned, exclusive, and occasionally renewed with snacks. Their independence means they can thrive on their own, making them perfect for busy lifestyles.
@@ -33,22 +36,19 @@ const AUDIENCE_OPTIONS = [
   { value: "other", label: "Other" },
 ];
 const AUDIENCE_FAMILIARITY_OPTIONS = [
-  { value: "", label: "(none)" },
   { value: "new", label: "New" },
   { value: "somewhat_familiar", label: "Somewhat familiar" },
   { value: "very_familiar", label: "Very familiar" },
 ];
 const DETAIL_LEVEL_OPTIONS = [
-  { value: "", label: "(none)" },
   { value: "quick_take", label: "Quick take" },
   { value: "practical", label: "Practical" },
   { value: "deep_dive", label: "Deep dive" },
 ];
 const TONE_OPTIONS = ["professional", "analytical", "conversational"];
-const STANCE_OPTIONS = ["neutral", "supportive", "contrarian", "balanced"];
-const PRIMARY_GOAL_OPTIONS = ["", "educate", "thought_leadership", "promote", "entertain", "recruit", "community", "convert"];
-const DESIRED_ACTION_OPTIONS = ["", "comment", "share", "follow", "click", "dm", "subscribe", "buy"];
-const TARGETS = ["linkedin", "x", "youtube", "instagram", "substack", "medium", "github"];
+const STANCE_OPTIONS = ["supportive", "contrarian", "balanced"];
+const PRIMARY_GOAL_OPTIONS = ["educate", "thought_leadership", "promote", "entertain", "recruit", "community", "convert"];
+const DESIRED_ACTION_OPTIONS = ["comment", "share", "follow", "click", "dm", "subscribe", "buy"];
 const ARTIFACT_FORMAT_DISPLAY_ORDER = {
   text: [
     "caption",
@@ -127,10 +127,10 @@ function makeDefaultImageStyleSettings() {
   return {
     theme: "",
     subject_prompt: "",
-    include_master_content: true,
     avoid: ["watermark", "gibberish text"],
     medium: "illustration",
     texture: "clean",
+    lighting: "soft_daylight",
     palette_mode: "muted",
     brand_colors: {
       primary: "#0F172A",
@@ -201,7 +201,6 @@ function makeDefaultVideoStyleSettings() {
   return {
     theme: "",
     subject_prompt: "",
-    include_master_content: true,
     avoid: ["watermarks", "logos", "ui screenshots", "real people"],
     mood: "energetic",
     lighting: "soft_daylight",
@@ -213,6 +212,8 @@ function makeDefaultVideoStyleSettings() {
       background: "#F8FAFC",
     },
     output_fidelity: "standard",
+    camera_motion: "",
+    energy_level: "medium",
   };
 }
 
@@ -289,10 +290,13 @@ function orderArtifactFormats(kind, formats) {
   });
 }
 
-function LabelWithTooltip({ text, tooltip }) {
+function LabelWithTooltip({ text, tooltip, required = false }) {
   return (
     <div className="label-row">
-      <label>{text}</label>
+      <label>
+        {text}
+        {required ? <span className="publish-required-mark"> *</span> : null}
+      </label>
       {tooltip ? (
         <span className="tooltip-icon" title={tooltip} aria-label={tooltip} tabIndex={0} role="note">
           ?
@@ -321,6 +325,10 @@ async function apiRequest(baseUrl, method, path, body, token = "") {
     throw new Error(`${res.status} ${detail}`);
   }
   return json;
+}
+
+function encodePathSegment(value) {
+  return encodeURIComponent(String(value || "").trim());
 }
 
 function getVersionLabel(v) {
@@ -379,6 +387,12 @@ function videoSrcFromAsset(asset) {
   return "";
 }
 
+function autoResizeTextarea(el) {
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+}
+
 export default function App() {
   const [apiBaseUrl, setApiBaseUrl] = useState(API_BASE_DEFAULT);
   const [authToken, setAuthToken] = useState(() => window.localStorage.getItem("cpublishr_token") || "");
@@ -398,22 +412,20 @@ export default function App() {
 
   const [form, setForm] = useState({
     project_id: "proj_local_1",
-    topic_title: "Cats are better than dogs",
-    core_idea: "Cats are better than dogs",
-    user_content: DEFAULT_USER_CONTENT,
-    target_audience_segment: "builders_developers",
+    topic_title: "",
+    core_idea: "",
+    user_content: "",
+    target_audience_segment: "general",
     target_audience_notes: "",
-    audience_familiarity: "",
-    detail_level: "practical",
+    audience_familiarity: "somewhat_familiar",
+    detail_level: "quick_take",
     tone_preference: "conversational",
     stance: "balanced",
-    primary_goal: "",
-    desired_action: "",
-    voice_profile_id: "vp_local_1",
-    constraints: null,
+    primary_goal: "community",
+    desired_action: "comment",
+    voice_profile_id: "",
     distribution_targets: ["x", "instagram"],
   });
-  const [constraintsText, setConstraintsText] = useState("");
 
   const [versions, setVersions] = useState([]);
   const [selectedVersionNumber, setSelectedVersionNumber] = useState(null);
@@ -460,10 +472,59 @@ export default function App() {
   const [isPublishArtifactsLoading, setIsPublishArtifactsLoading] = useState(false);
   const [publishFieldMappings, setPublishFieldMappings] = useState({});
   const [publishSaveMessage, setPublishSaveMessage] = useState("");
-  const [showSavePublishModal, setShowSavePublishModal] = useState(false);
-  const [savePublishName, setSavePublishName] = useState("");
-  const [savePublishLocation, setSavePublishLocation] = useState("");
-  const [isPickingOutputPath, setIsPickingOutputPath] = useState(false);
+  const [showPublishSaveDialog, setShowPublishSaveDialog] = useState(false);
+  const [publishSaveUserName, setPublishSaveUserName] = useState("");
+  const [publishSaveDestinationMode, setPublishSaveDestinationMode] = useState(() => {
+    const raw = window.localStorage.getItem("cpublishr_publish_destination_mode") || "url";
+    return raw === "local" ? "local" : "url";
+  }); // url | local
+  const [publishSaveOutputPath, setPublishSaveOutputPath] = useState(
+    () => window.localStorage.getItem("cpublishr_publish_output_path") || ""
+  );
+  const [publishBrowseCurrentPath, setPublishBrowseCurrentPath] = useState("");
+  const [publishBrowseParentPath, setPublishBrowseParentPath] = useState("");
+  const [publishBrowseDirectories, setPublishBrowseDirectories] = useState([]);
+  const [isPublishBrowsingPaths, setIsPublishBrowsingPaths] = useState(false);
+  const [isPublishPickingLocalPath, setIsPublishPickingLocalPath] = useState(false);
+  const [artifactEditMode, setArtifactEditMode] = useState("none"); // none | inline | iterate
+  const [isArtifactEditing, setIsArtifactEditing] = useState(false);
+  const [artifactInlineText, setArtifactInlineText] = useState("");
+  const [artifactIterateInstruction, setArtifactIterateInstruction] = useState("");
+  const [artifactIterateStyleSource, setArtifactIterateStyleSource] = useState("manual");
+  const [artifactIterateVoiceProfileId, setArtifactIterateVoiceProfileId] = useState("");
+  const [artifactIterateManualCoreVoice, setArtifactIterateManualCoreVoice] = useState("");
+  const [artifactIterateToneNuance, setArtifactIterateToneNuance] = useState(() => makeDefaultToneNuance("conversational"));
+  const [artifactIterateFrameworkMode, setArtifactIterateFrameworkMode] = useState("light");
+  const [artifactIterateFormatAdvanced, setArtifactIterateFormatAdvanced] = useState(() => makeDefaultFormatAdvancedSettings());
+  const [artifactIterateImageStyle, setArtifactIterateImageStyle] = useState(() => ({
+    medium: "illustration",
+    texture: "clean",
+    lighting: "soft_daylight",
+    palette_mode: "muted",
+    mood: "premium",
+    focus_negative_space: "subject_centered",
+    output_fidelity: "standard",
+    brand_colors: {
+      primary: "#0F172A",
+      secondary: "#1D4ED8",
+      accent: "#22C55E",
+      background: "#F8FAFC",
+    },
+  }));
+  const [artifactIterateVideoStyle, setArtifactIterateVideoStyle] = useState(() => ({
+    mood: "energetic",
+    lighting: "soft_daylight",
+    palette_mode: "muted",
+    output_fidelity: "standard",
+    camera_motion: "",
+    energy_level: "medium",
+    brand_colors: {
+      primary: "#0F172A",
+      secondary: "#1D4ED8",
+      accent: "#22C55E",
+      background: "#F8FAFC",
+    },
+  }));
   const [editingArtifactTitleId, setEditingArtifactTitleId] = useState("");
   const [editingArtifactTitleValue, setEditingArtifactTitleValue] = useState("");
   const [isSavingArtifactTitle, setIsSavingArtifactTitle] = useState(false);
@@ -473,6 +534,8 @@ export default function App() {
   const [vpCollectionDetail, setVpCollectionDetail] = useState(null);
   const [vpSelectedVersionId, setVpSelectedVersionId] = useState("");
   const [vpVersionDetail, setVpVersionDetail] = useState(null);
+  const [showVpVersionControls, setShowVpVersionControls] = useState(false);
+  const [showVpCreateCollectionForm, setShowVpCreateCollectionForm] = useState(false);
   const [vpCreateForm, setVpCreateForm] = useState({ voice_profile_name: "", platforms: ["linkedin"] });
   const [vpGenerateForm, setVpGenerateForm] = useState({
     intended_use: "",
@@ -482,10 +545,45 @@ export default function App() {
   const [isVpGenerating, setIsVpGenerating] = useState(false);
   const [userProjects, setUserProjects] = useState([]);
   const [isProjectsLoading, setIsProjectsLoading] = useState(false);
+  const [hasManuallyEditedProjectId, setHasManuallyEditedProjectId] = useState(false);
+  const [isCreatingNewProject, setIsCreatingNewProject] = useState(false);
   const contentCheckSeqRef = useRef(0);
   const storedArtifactsCheckSeqRef = useRef(0);
   const artifactStyleSeedFetchRef = useRef("");
+  const artifactInlineTextareaRef = useRef(null);
+  const artifactIterateInstructionTextareaRef = useRef(null);
+  const artifactIterateVoiceStyleTextareaRef = useRef(null);
+  const editorialInlineTextareaRef = useRef(null);
+  const editorialFeedbackTextareaRef = useRef(null);
+  const userContentTextareaRef = useRef(null);
   const isAuthenticated = !!authToken;
+  const currentProjectSummary = useMemo(() => {
+    const current = String(form.project_id || "").trim();
+    if (!current) return null;
+    return userProjects.find((p) => String(p?.project_id || "").trim() === current) || null;
+  }, [userProjects, form.project_id]);
+  const isExistingProjectFlow = isAuthenticated && !!currentProjectSummary && !isCreatingNewProject;
+  const finalizedVersionBanner = useMemo(() => {
+    const finalVersionNumber = Number(currentProjectSummary?.final_version_number);
+    const list = Array.isArray(versions) ? versions : [];
+    const fromProject = Number.isFinite(finalVersionNumber)
+      ? list.find((v) => Number(v?.version_number) === finalVersionNumber) || null
+      : null;
+    const fallbackFinal = fromProject || [...list]
+      .filter((v) => String(v?.version_stage || "").trim().toLowerCase() === "final")
+      .sort((a, b) => Number(b?.version_number || 0) - Number(a?.version_number || 0))[0] || null;
+    if (!fallbackFinal) return "";
+    return `Finalized content: ${getVersionLabel(fallbackFinal)} (v${fallbackFinal.version_number})`;
+  }, [versions, currentProjectSummary]);
+  const topBannerMessage = useMemo(() => {
+    if (page === "settings") {
+      return "";
+    }
+    if ((page === "artifacts" || page === "publish") && finalizedVersionBanner) {
+      return finalizedVersionBanner;
+    }
+    return message;
+  }, [page, finalizedVersionBanner, message]);
 
   const selectedVersion = useMemo(
     () => versions.find((v) => v.version_number === selectedVersionNumber) || null,
@@ -561,6 +659,7 @@ export default function App() {
     return storedArtifacts.filter((a) => a?.format === selectedStoredFormat);
   }, [storedArtifacts, selectedStoredFormat]);
   const selectedStoredArtifact = filteredStoredArtifacts[selectedStoredArtifactTab] || null;
+  const isArtifactEditActive = artifactEditMode !== "none";
   const approvedActiveVoiceProfileOptions = useMemo(() => {
     return vpCollections
       .filter((c) => c?.active_version && String(c.active_version.generation_status || "").toLowerCase() === "approved")
@@ -611,6 +710,69 @@ export default function App() {
     }
     return out;
   }, [publishArtifacts]);
+  const areRequiredPublishFieldsMapped = useMemo(() => {
+    const schemaRows = Array.isArray(publishFieldSchema) ? publishFieldSchema : [];
+    const requiredRows = schemaRows.filter((field) => !!field?.required);
+    if (!requiredRows.length) return true;
+    for (const field of requiredRows) {
+      const fieldKey = String(field?.field_key || "").trim();
+      if (!fieldKey) return false;
+      const rows = Array.isArray(publishFieldMappings?.[fieldKey]) ? publishFieldMappings[fieldKey] : [];
+      let hasValid = false;
+      for (const row of rows) {
+        const artifactId = String(row?.artifact_id || "").trim();
+        const artifact = publishArtifactsById[artifactId] || null;
+        const primaryPart = String(row?.primary_part || "").trim() || defaultPublishPartForArtifact(artifact);
+        if (artifactId && primaryPart) {
+          hasValid = true;
+          break;
+        }
+      }
+      if (!hasValid) return false;
+    }
+    return true;
+  }, [publishFieldSchema, publishFieldMappings, publishArtifactsById]);
+  const platformTargets = useMemo(
+    () => uniqueStrings((publishPlatforms || []).map((p) => String(p || "").trim()).filter(Boolean)),
+    [publishPlatforms]
+  );
+  const canGenerateContent = useMemo(() => {
+    const topicTitle = String(form.topic_title || "").trim();
+    const coreIdea = String(form.core_idea || "").trim();
+    const targetAudience = String(form.target_audience_segment || "").trim();
+    const tonePreference = String(form.tone_preference || "").trim();
+    const voiceProfileId = String(form.voice_profile_id || "").trim();
+    return !!(topicTitle && coreIdea && targetAudience && tonePreference && voiceProfileId);
+  }, [form]);
+  const canGenerateArtifactsNow = useMemo(() => {
+    if (!selectedArtifactFormats.length) return false;
+    const hasTextSelection = selectedArtifactFormats.some((fmt) => artifactFormatKindMap?.[fmt] === "text");
+    const hasImageSelection = artifactSelectedKinds.includes("image");
+    const hasVideoSelection = artifactSelectedKinds.includes("video") || artifactSelectedKinds.includes("gif");
+
+    if (hasTextSelection) {
+      if (artifactStyleSource === "manual" && !(artifactManualCoreVoice || "").trim()) return false;
+      if (artifactStyleSource === "voice_profile" && !(artifactStyleVoiceProfileId || "").trim()) return false;
+    }
+    if (hasImageSelection) {
+      if (!(artifactImageStyle?.theme || "").trim()) return false;
+      if (!(artifactImageStyle?.subject_prompt || "").trim()) return false;
+    }
+    if (hasVideoSelection) {
+      if (!(artifactVideoStyle?.theme || "").trim()) return false;
+      if (!(artifactVideoStyle?.subject_prompt || "").trim()) return false;
+    }
+    return true;
+  }, [
+    selectedArtifactFormats,
+    artifactFormatKindMap,
+    artifactSelectedKinds,
+    artifactStyleSource,
+    artifactManualCoreVoice,
+    artifactStyleVoiceProfileId,
+    artifactImageStyle,
+    artifactVideoStyle,
+  ]);
 
   function renderStoredArtifactContent(artifact) {
     if (!artifact) return null;
@@ -624,15 +786,35 @@ export default function App() {
     const assets = Array.isArray(payload.assets) ? payload.assets : [];
     const primaryAsset = assets[0] || null;
     const assetRef = String(primaryAsset?.uri || primaryAsset?.path || "").trim();
+    const prompts = Array.isArray(payload.prompts) ? payload.prompts : [];
+    const qcPromptRef = (() => {
+      const fromSettingsUri = String(
+        settings?.qc_prompt_uri || settings?.source_prompt_uri || settings?.prompt_uri || ""
+      ).trim();
+      if (fromSettingsUri) {
+        return fromSettingsUri;
+      }
+      for (const p of prompts) {
+        if (!p || typeof p !== "object") continue;
+        const uri = String(p.uri || p.url || "").trim();
+        if (uri && uri.toLowerCase().includes("/qc-prompts/")) {
+          return uri;
+        }
+      }
+      return null;
+    })();
     const revisionLabel = artifact?.revision != null ? `v${artifact.revision}` : null;
-    const psBits = [revisionLabel, assetRef ? `File/URL: ${assetRef}` : null].filter(Boolean);
+    const psBits = [
+      revisionLabel,
+      assetRef ? `File/URL: ${assetRef}` : null,
+      qcPromptRef ? `QC Prompt URL: ${qcPromptRef}` : null,
+    ].filter(Boolean);
 
     if (["image_generation", "post_image", "thumbnail", "banner", "cover"].includes(fmt)) {
       const imageAsset = assets.find((a) => String(a?.mime_type || "").startsWith("image/")) || assets[0] || null;
       const imageSrc = imageSrcFromAsset(imageAsset);
       return (
         <div className="artifact-render">
-          <h4 className="artifact-render-title">{artifact.title || "Image Artifact"}</h4>
           {imageSrc ? (
             <img className="artifact-image-preview" src={imageSrc} alt={artifact.title || "Generated image"} />
           ) : (
@@ -667,7 +849,6 @@ export default function App() {
 
       return (
         <div className="artifact-render">
-          <h4 className="artifact-render-title">{artifact.title || fmt}</h4>
           {imageSrc ? (
             <img className="artifact-image-preview" src={imageSrc} alt={artifact.title || "Generated GIF"} />
           ) : videoSrc ? (
@@ -705,7 +886,6 @@ export default function App() {
         .sort((a, b) => a.seq - b.seq);
       return (
         <div className="artifact-render">
-          <h4 className="artifact-render-title">{artifact.title || "CTA Variants"}</h4>
           <div className="artifact-cta-grid">
             {ctas.map((cta, idx) => (
               <button key={`${cta.seq}-${idx}`} type="button" className="secondary artifact-cta-button">
@@ -726,7 +906,6 @@ export default function App() {
       const targetDurationSec = Number(settings?.target_duration_sec || 0);
       return (
         <div className="artifact-render">
-          <h4 className="artifact-render-title">{artifact.title || "Short Script"}</h4>
           {targetDurationSec > 0 ? (
             <p className="note" style={{ marginTop: "-2px", marginBottom: "10px" }}>
               Target duration: {targetDurationSec}s
@@ -750,7 +929,6 @@ export default function App() {
     if (fmt === "blog" || fmt === "blog_long" || fmt === "newsletter") {
       return (
         <div className="artifact-render">
-          <h4 className="artifact-render-title">{artifact.title || fmt}</h4>
           <article className="artifact-doc">{body || "No content available."}</article>
           {topicTags.length ? (
             <div className="artifact-hashtags">
@@ -766,7 +944,6 @@ export default function App() {
       const socialTags = hashtags.length ? hashtags : topicTags;
       return (
         <div className="artifact-render">
-          <h4 className="artifact-render-title">{artifact.title || fmt}</h4>
           <div className="artifact-social">{body || "No content available."}</div>
           {socialTags.length ? (
             <div className="artifact-hashtags">
@@ -781,17 +958,26 @@ export default function App() {
     return <pre className="content">{JSON.stringify(artifact, null, 2)}</pre>;
   }
 
-  async function refreshVersions(projectId, preferredVersion) {
-    const data = await request("GET", `/api/v1/versions/${projectId}`);
+async function refreshVersions(projectId, preferredVersion) {
+    const data = await request("GET", `/api/v1/versions/${encodePathSegment(projectId)}`);
     const list = data?.versions || [];
     setVersions(list);
     if (preferredVersion && list.some((v) => v.version_number === preferredVersion)) {
       setSelectedVersionNumber(preferredVersion);
-      return;
+      return list;
     }
+    const finalVersionFromProject = Number(currentProjectSummary?.final_version_number);
+    if (Number.isFinite(finalVersionFromProject) && list.some((v) => v.version_number === finalVersionFromProject)) {
+      setSelectedVersionNumber(finalVersionFromProject);
+      return list;
+    }
+    const latestFinal = [...list]
+      .filter((v) => String(v?.version_stage || "").trim().toLowerCase() === "final")
+      .sort((a, b) => Number(b?.version_number || 0) - Number(a?.version_number || 0))[0] || null;
     const base = list.find((v) => v.version_kind === "base");
-    const fallback = base || list[0] || null;
+    const fallback = latestFinal || base || list[0] || null;
     setSelectedVersionNumber(fallback ? fallback.version_number : null);
+    return list;
   }
 
   function persistAuthToken(token) {
@@ -799,6 +985,30 @@ export default function App() {
     setAuthToken(next);
     if (next) window.localStorage.setItem("cpublishr_token", next);
     else window.localStorage.removeItem("cpublishr_token");
+  }
+
+  async function openEditorialForProject(projectId) {
+    const normalizedProjectId = String(projectId || "").trim();
+    if (!normalizedProjectId) {
+      setError("Project ID is required.");
+      return;
+    }
+    setError("");
+    setMessage("");
+    setBusy(true);
+    try {
+      const versionsList = await refreshVersions(normalizedProjectId);
+      setPage("editorial");
+      if (Array.isArray(versionsList) && versionsList.length) {
+        setMessage("Editorial content loaded.");
+      } else {
+        setMessage(`No saved versions found for project "${normalizedProjectId}".`);
+      }
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function request(method, path, body) {
@@ -833,7 +1043,7 @@ export default function App() {
       const hasCurrent = currentProjectId && rows.some((p) => p?.project_id === currentProjectId);
       if (!currentProjectId && rows[0]?.project_id) {
         setForm((prev) => ({ ...prev, project_id: rows[0].project_id }));
-      } else if (!hasCurrent && rows[0]?.project_id) {
+      } else if (!hasCurrent && !hasManuallyEditedProjectId && rows[0]?.project_id) {
         setForm((prev) => ({ ...prev, project_id: rows[0].project_id }));
       }
     } catch {
@@ -883,7 +1093,41 @@ export default function App() {
     setVpCollectionDetail(null);
     setVpSelectedVersionId("");
     setVpVersionDetail(null);
+    setShowVpVersionControls(false);
+    setShowVpCreateCollectionForm(false);
+    setHasManuallyEditedProjectId(false);
+    setIsCreatingNewProject(false);
     setMessage("Logged out.");
+  }
+
+  function onNewProjectIdChange(nextProjectId) {
+    setHasManuallyEditedProjectId(true);
+    setIsCreatingNewProject(true);
+    setForm((prev) => ({ ...prev, project_id: nextProjectId }));
+  }
+
+  async function onSelectExistingProject(projectId) {
+    const value = String(projectId || "").trim();
+    if (!value) return;
+    setHasManuallyEditedProjectId(true);
+    setIsCreatingNewProject(false);
+    setForm((prev) => ({ ...prev, project_id: value }));
+    await openEditorialForProject(value);
+  }
+
+  function onCreateNewProject() {
+    setHasManuallyEditedProjectId(true);
+    setIsCreatingNewProject(true);
+    setForm((prev) => ({ ...prev, project_id: "" }));
+    setHasExistingContent(false);
+    setShowGenerateSetupForm(true);
+    setPage("setup");
+  }
+
+  function onSelectVpCollection(collectionId) {
+    setVpSelectedCollectionId(collectionId);
+    setShowVpVersionControls(false);
+    setShowVpCreateCollectionForm(false);
   }
 
   async function vpRequest(method, path, body) {
@@ -897,6 +1141,8 @@ export default function App() {
       setVpCollectionDetail(null);
       setVpSelectedVersionId("");
       setVpVersionDetail(null);
+      setShowVpVersionControls(false);
+      setShowVpCreateCollectionForm(false);
       return;
     }
     const out = await vpRequest("GET", "/api/v1/voice-profiles/collections");
@@ -1060,6 +1306,48 @@ export default function App() {
     }));
   }
 
+  function updateArtifactIterateToneNuance(field, value) {
+    setArtifactIterateToneNuance((prev) => ({ ...prev, [field]: value }));
+  }
+
+  function updateArtifactIterateAdvanced(formatKey, field, value) {
+    setArtifactIterateFormatAdvanced((prev) => ({
+      ...prev,
+      [formatKey]: {
+        ...(prev?.[formatKey] || {}),
+        [field]: value,
+      },
+    }));
+  }
+
+  function updateArtifactIterateImageStyle(field, value) {
+    setArtifactIterateImageStyle((prev) => ({ ...prev, [field]: value }));
+  }
+
+  function updateArtifactIterateImageBrandColor(field, value) {
+    setArtifactIterateImageStyle((prev) => ({
+      ...prev,
+      brand_colors: {
+        ...(prev?.brand_colors || {}),
+        [field]: value,
+      },
+    }));
+  }
+
+  function updateArtifactIterateVideoStyle(field, value) {
+    setArtifactIterateVideoStyle((prev) => ({ ...prev, [field]: value }));
+  }
+
+  function updateArtifactIterateVideoBrandColor(field, value) {
+    setArtifactIterateVideoStyle((prev) => ({
+      ...prev,
+      brand_colors: {
+        ...(prev?.brand_colors || {}),
+        [field]: value,
+      },
+    }));
+  }
+
   function buildArtifactTextKindStyleSettings() {
     const toneBase = toneBaseFromProjectTone(form.tone_preference);
     const toneNuancePayload = {
@@ -1116,10 +1404,10 @@ export default function App() {
       out.image = {
         theme: String(artifactImageStyle?.theme || "").trim(),
         subject_prompt: String(artifactImageStyle?.subject_prompt || "").trim(),
-        include_master_content: !!artifactImageStyle?.include_master_content,
         avoid,
         medium: String(artifactImageStyle?.medium || "illustration"),
         texture: String(artifactImageStyle?.texture || "clean"),
+        lighting: String(artifactImageStyle?.lighting || "soft_daylight"),
         palette_mode: String(artifactImageStyle?.palette_mode || "muted"),
         mood: String(artifactImageStyle?.mood || "premium"),
         focus_negative_space: String(artifactImageStyle?.focus_negative_space || "subject_centered"),
@@ -1139,12 +1427,13 @@ export default function App() {
       const videoPayload = {
         theme: String(artifactVideoStyle?.theme || "").trim(),
         subject_prompt: String(artifactVideoStyle?.subject_prompt || "").trim(),
-        include_master_content: !!artifactVideoStyle?.include_master_content,
         avoid,
         mood: String(artifactVideoStyle?.mood || "energetic"),
         lighting: String(artifactVideoStyle?.lighting || "soft_daylight"),
         palette_mode: String(artifactVideoStyle?.palette_mode || "muted"),
         output_fidelity: String(artifactVideoStyle?.output_fidelity || "standard").toLowerCase(),
+        camera_motion: String(artifactVideoStyle?.camera_motion || "").trim(),
+        energy_level: String(artifactVideoStyle?.energy_level || "medium"),
       };
       if (String(videoPayload.palette_mode) === "brand") {
         videoPayload.brand_colors = {
@@ -1185,6 +1474,111 @@ export default function App() {
     return out;
   }
 
+  function getStoredArtifactSourceBlobPaths(artifact) {
+    const assets = Array.isArray(artifact?.payload_json?.assets) ? artifact.payload_json.assets : [];
+    return uniqueStrings(
+      assets
+        .map((a) => String(a?.blob_path || a?.uri || a?.path || "").trim())
+        .filter(Boolean)
+    );
+  }
+
+  function buildIterateKindStyleSettings(artifact) {
+    const kind = String(artifact?.kind || "").trim().toLowerCase();
+    if (!kind) return {};
+    if (kind === "text") {
+      const toneBase = toneBaseFromProjectTone(form.tone_preference);
+      const toneNuancePayload = {
+        tone_base: toneBase,
+        tone_nuance: {
+          directness: clampInt(artifactIterateToneNuance.directness, 0, 4, 2),
+          warmth: clampInt(artifactIterateToneNuance.warmth, 0, 4, 2),
+          energy: clampInt(artifactIterateToneNuance.energy, 0, 4, 2),
+          authority: clampInt(artifactIterateToneNuance.authority, 0, 4, 2),
+        },
+      };
+      if (toneBase === "analytical") {
+        toneNuancePayload.tone_nuance.rigor = clampInt(artifactIterateToneNuance.rigor, 0, 4, 3);
+        toneNuancePayload.tone_nuance.abstraction = clampInt(artifactIterateToneNuance.abstraction, 0, 4, 2);
+        toneNuancePayload.tone_nuance.framework_mode = String(artifactIterateFrameworkMode || "light");
+      }
+      const manualCoreVoice = String(artifactIterateManualCoreVoice || "").trim();
+      const textStyle = artifactIterateStyleSource === "voice_profile"
+        ? {
+          style_source: "voice_profile",
+          voice_profile_id: (artifactIterateVoiceProfileId || form.voice_profile_id || "").trim(),
+          voice_profile_preview: artifactSelectedVoiceProfilePreview || null,
+        }
+        : (manualCoreVoice
+          ? { style_source: "manual", core_voice: manualCoreVoice }
+          : {});
+      return { text: { ...textStyle, ...toneNuancePayload } };
+    }
+    if (kind === "image") {
+      const imagePayload = {
+        medium: String(artifactIterateImageStyle?.medium || "illustration"),
+        texture: String(artifactIterateImageStyle?.texture || "clean"),
+        lighting: String(artifactIterateImageStyle?.lighting || "soft_daylight"),
+        palette_mode: String(artifactIterateImageStyle?.palette_mode || "muted"),
+        mood: String(artifactIterateImageStyle?.mood || "premium"),
+        focus_negative_space: String(artifactIterateImageStyle?.focus_negative_space || "subject_centered"),
+        output_fidelity: String(artifactIterateImageStyle?.output_fidelity || "standard").toLowerCase(),
+      };
+      if (imagePayload.palette_mode === "brand") {
+        imagePayload.brand_colors = {
+          primary: String(artifactIterateImageStyle?.brand_colors?.primary || "").trim(),
+          secondary: String(artifactIterateImageStyle?.brand_colors?.secondary || "").trim(),
+          accent: String(artifactIterateImageStyle?.brand_colors?.accent || "").trim(),
+          background: String(artifactIterateImageStyle?.brand_colors?.background || "").trim(),
+        };
+      }
+      return { image: imagePayload };
+    }
+    if (kind === "video" || kind === "gif") {
+      const videoPayload = {
+        mood: String(artifactIterateVideoStyle?.mood || "energetic"),
+        lighting: String(artifactIterateVideoStyle?.lighting || "soft_daylight"),
+        palette_mode: String(artifactIterateVideoStyle?.palette_mode || "muted"),
+        output_fidelity: String(artifactIterateVideoStyle?.output_fidelity || "standard").toLowerCase(),
+        camera_motion: String(artifactIterateVideoStyle?.camera_motion || "").trim(),
+        energy_level: String(artifactIterateVideoStyle?.energy_level || "medium"),
+      };
+      if (videoPayload.palette_mode === "brand") {
+        videoPayload.brand_colors = {
+          primary: String(artifactIterateVideoStyle?.brand_colors?.primary || "").trim(),
+          secondary: String(artifactIterateVideoStyle?.brand_colors?.secondary || "").trim(),
+          accent: String(artifactIterateVideoStyle?.brand_colors?.accent || "").trim(),
+          background: String(artifactIterateVideoStyle?.brand_colors?.background || "").trim(),
+        };
+      }
+      return kind === "gif" ? { gif: videoPayload } : { video: videoPayload };
+    }
+    return {};
+  }
+
+  function buildIterateFormatStyleOverrides(artifact) {
+    const fmt = String(artifact?.format || "").trim();
+    if (!Object.prototype.hasOwnProperty.call(FORMAT_ADVANCED_DEFAULTS, fmt)) return {};
+    const settings = artifactIterateFormatAdvanced?.[fmt];
+    if (!settings || typeof settings !== "object") return {};
+    const out = { [fmt]: { ...settings } };
+    if (fmt === "newsletter") {
+      out[fmt].sections = clampInt(settings.sections, 3, 5, 4);
+      out[fmt].takeaway_bullets = clampInt(settings.takeaway_bullets, 3, 6, 4);
+    }
+    if (fmt === "blog") {
+      out[fmt].faq_count = clampInt(settings.faq_count, 0, 5, 3);
+    }
+    if (fmt === "script_short") {
+      out[fmt].target_duration_sec = clampInt(settings.target_duration_sec, 15, 60, 30);
+    }
+    if (fmt === "cta_variants") {
+      out[fmt].variant_count = clampInt(settings.variant_count, 7, 11, 7);
+      out[fmt].angles = uniqueStrings(settings.angles || []);
+    }
+    return out;
+  }
+
   function toggleVpPlatform(platform) {
     const curr = new Set(vpCreateForm.platforms || []);
     if (curr.has(platform)) curr.delete(platform);
@@ -1205,6 +1599,8 @@ export default function App() {
       const newId = out?.collection?.voice_profile_id || "";
       setVpCreateForm({ voice_profile_name: "", platforms: ["linkedin"] });
       await loadVpCollections(newId);
+      setShowVpVersionControls(false);
+      setShowVpCreateCollectionForm(false);
       setMessage("Voice profile collection created.");
     } catch (e) {
       setError(e.message || String(e));
@@ -1263,6 +1659,7 @@ export default function App() {
       await loadVpCollections(vpSelectedCollectionId);
       await loadVpCollectionDetail(vpSelectedCollectionId);
       if (newVersionId) setVpSelectedVersionId(newVersionId);
+      setShowVpVersionControls(false);
       setMessage(`Voice profile version generated. Dataset entries written: ${out?.dataset_entries_written ?? 0}.`);
     } catch (e) {
       setError(e.message || String(e));
@@ -1315,11 +1712,12 @@ export default function App() {
     const requestSeq = ++contentCheckSeqRef.current;
     if (!normalizedProjectId) {
       setHasExistingContent(false);
+      setShowGenerateSetupForm(true);
       return;
     }
     setIsCheckingProjectData(true);
     try {
-      const data = await request("GET", `/api/v1/versions/${normalizedProjectId}`);
+      const data = await request("GET", `/api/v1/versions/${encodePathSegment(normalizedProjectId)}`);
       if (requestSeq !== contentCheckSeqRef.current) return;
       const list = data?.versions || [];
       const exists = Array.isArray(list) && list.length > 0;
@@ -1351,27 +1749,22 @@ export default function App() {
   }
 
   function buildTopicPayload() {
-    let constraints = null;
-    if ((constraintsText || "").trim()) {
-      try {
-        const parsed = JSON.parse(constraintsText);
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          constraints = parsed;
-        } else {
-          throw new Error("Constraints must be a JSON object.");
-        }
-      } catch {
-        throw new Error("Constraints must be valid JSON object text.");
-      }
-    }
+    const topicTitle = (form.topic_title || "").trim();
+    const coreIdea = (form.core_idea || "").trim();
     const voiceProfileId = (form.voice_profile_id || "").trim();
+    if (!topicTitle) {
+      throw new Error("Topic Title is required.");
+    }
+    if (!coreIdea) {
+      throw new Error("Core Idea is required.");
+    }
     if (!voiceProfileId) {
       throw new Error("Voice Profile ID is required.");
     }
     return {
       project_id: (form.project_id || "").trim(),
-      topic_title: (form.topic_title || "").trim(),
-      core_idea: (form.core_idea || "").trim(),
+      topic_title: topicTitle,
+      core_idea: coreIdea,
       user_content: (form.user_content || "").trim() || null,
       target_audience: {
         primary_segment: form.target_audience_segment,
@@ -1384,7 +1777,6 @@ export default function App() {
       primary_goal: form.primary_goal || null,
       desired_action: form.desired_action || null,
       voice_profile_id: voiceProfileId,
-      constraints,
       distribution_targets: form.distribution_targets.length ? form.distribution_targets : null,
     };
   }
@@ -1470,24 +1862,8 @@ export default function App() {
     }
   }
 
-  async function onRetrieveContent() {
-    const projectId = (form.project_id || "").trim();
-    if (!projectId) {
-      setError("Project ID is required.");
-      return;
-    }
-    setError("");
-    setMessage("");
-    setBusy(true);
-    try {
-      await refreshVersions(projectId);
-      setPage("editorial");
-      setMessage("Existing content retrieved. You can continue in Editorial.");
-    } catch (e) {
-      setError(e.message || String(e));
-    } finally {
-      setBusy(false);
-    }
+  async function onOpenEditorialPage() {
+    await openEditorialForProject(form.project_id);
   }
 
   async function onPatchKeywords(nextKeywords) {
@@ -1677,39 +2053,20 @@ export default function App() {
     }
   }
 
+  function onCancelEditorialEdit() {
+    setEditorMode("none");
+    setFeedbackPreviewContent("");
+    if (selectedVersion) {
+      setWorkingContent(selectedVersion.content || "");
+    }
+  }
+
   async function onGenerateArtifacts() {
     if (!selectedArtifactFormats.length) {
       setError("Select at least one artifact format.");
       return;
     }
-    const hasTextSelection = selectedArtifactFormats.some((fmt) => artifactFormatKindMap?.[fmt] === "text");
-    const hasImageSelection = selectedArtifactFormats.some((fmt) => artifactFormatKindMap?.[fmt] === "image");
-    const hasVideoOrGifSelection = selectedArtifactFormats.some((fmt) => {
-      const kind = artifactFormatKindMap?.[fmt];
-      return kind === "video" || kind === "gif";
-    });
-    if (hasTextSelection && artifactStyleSource === "manual" && !(artifactManualCoreVoice || "").trim()) {
-      setError("For manual style, Voice Style is required.");
-      return;
-    }
-    if (hasTextSelection && artifactStyleSource === "voice_profile" && !(artifactStyleVoiceProfileId || "").trim()) {
-      setError("Select a saved voice profile or switch to manual style.");
-      return;
-    }
-    if (hasImageSelection && !(artifactImageStyle?.theme || "").trim()) {
-      setError("Image Theme is required.");
-      return;
-    }
-    if (hasImageSelection && !(artifactImageStyle?.subject_prompt || "").trim()) {
-      setError("Image Subject / core prompt is required.");
-      return;
-    }
-    if (hasVideoOrGifSelection && !(artifactVideoStyle?.theme || "").trim()) {
-      setError("Video Theme is required.");
-      return;
-    }
-    if (hasVideoOrGifSelection && !(artifactVideoStyle?.subject_prompt || "").trim()) {
-      setError("Video Subject / core prompt is required.");
+    if (!canGenerateArtifactsNow) {
       return;
     }
     setError("");
@@ -1737,7 +2094,15 @@ export default function App() {
         const generatedFormats = out.artifacts.map((a) => String(a?.format || "").trim()).filter(Boolean);
         setStoredArtifactFormatsForProject((prev) => uniqueStrings([...(prev || []), ...generatedFormats]));
       }
-      setMessage(`Generated ${count} artifact(s).`);
+      const genErrors = Array.isArray(out?.generation_errors) ? out.generation_errors : [];
+      if (genErrors.length) {
+        setError(genErrors.map((e) => `${e.format} failed - ${e.error}`).join("; "));
+      }
+      const errorSummary = genErrors.length
+        ? " Warning: " + genErrors.map((e) => `${e.format} failed — ${e.error}`).join("; ")
+        : "";
+      setMessage(`${count} artifact(s) generated.${errorSummary} Loading your artifacts...`);
+      setTimeout(() => onViewStoredArtifacts(), 1500);
     } catch (e) {
       setError(e.message || String(e));
     } finally {
@@ -1866,6 +2231,54 @@ export default function App() {
     }
   }
 
+  async function browsePublishOutputLocations(pathValue = "") {
+    setIsPublishBrowsingPaths(true);
+    try {
+      const query = String(pathValue || "").trim();
+      const endpoint = query
+        ? `/api/v1/publishing/output-path/browse?path=${encodeURIComponent(query)}`
+        : "/api/v1/publishing/output-path/browse";
+      const out = await request("GET", endpoint);
+      setPublishBrowseCurrentPath(String(out?.current_path || ""));
+      setPublishBrowseParentPath(String(out?.parent_path || ""));
+      setPublishBrowseDirectories(Array.isArray(out?.directories) ? out.directories : []);
+    } finally {
+      setIsPublishBrowsingPaths(false);
+    }
+  }
+
+  async function pickPublishOutputFolder() {
+    setIsPublishPickingLocalPath(true);
+    try {
+      const out = await request("POST", "/api/v1/publishing/output-path/pick-local", {
+        start_path: String(publishSaveOutputPath || publishBrowseCurrentPath || "").trim() || null,
+      });
+      const selected = String(out?.selected_path || "").trim();
+      if (selected) {
+        setPublishSaveOutputPath(selected);
+        window.localStorage.setItem("cpublishr_publish_output_path", selected);
+        await browsePublishOutputLocations(selected);
+      }
+    } finally {
+      setIsPublishPickingLocalPath(false);
+    }
+  }
+
+  function openSaveToPublishDialog() {
+    setError("");
+    setPublishSaveMessage("");
+    setPublishSaveUserName("");
+    setPublishBrowseCurrentPath("");
+    setPublishBrowseParentPath("");
+    setPublishBrowseDirectories([]);
+    setShowPublishSaveDialog(true);
+  }
+
+  function closeSaveToPublishDialog() {
+    if (busy || isPublishBrowsingPaths || isPublishPickingLocalPath) return;
+    setShowPublishSaveDialog(false);
+  }
+
   function buildSaveToPublishFieldMappings() {
     const schemaRows = Array.isArray(publishFieldSchema) ? publishFieldSchema : [];
     const out = [];
@@ -1902,23 +2315,7 @@ export default function App() {
     return out;
   }
 
-  async function onPickLocalOutputPath() {
-    setError("");
-    setIsPickingOutputPath(true);
-    try {
-      const out = await request("POST", "/api/v1/publishing/output-path/pick-local", {
-        start_path: String(savePublishLocation || "").trim() || null,
-      });
-      const selected = String(out?.selected_path || "").trim();
-      if (selected) setSavePublishLocation(selected);
-    } catch (e) {
-      setError(e.message || String(e));
-    } finally {
-      setIsPickingOutputPath(false);
-    }
-  }
-
-  function openSaveToPublishModal() {
+  async function onSaveToPublish() {
     setError("");
     setPublishSaveMessage("");
     const projectId = String(form.project_id || "").trim();
@@ -1931,100 +2328,37 @@ export default function App() {
       setError("Select a platform first.");
       return;
     }
-    setSavePublishName("");
-    setShowSavePublishModal(true);
-  }
-
-  function closeSaveToPublishModal() {
-    setShowSavePublishModal(false);
-  }
-
-  async function onConfirmSaveToPublish() {
-    setError("");
-    setPublishSaveMessage("");
-    const projectId = String(form.project_id || "").trim();
-    const platform = String(publishSelectedPlatform || "").trim();
-    if (!projectId) {
-      setError("Project ID is required.");
-      return;
-    }
-    if (!platform) {
-      setError("Select a platform first.");
-      return;
-    }
-    const userName = String(savePublishName || "").trim();
+    const userName = String(publishSaveUserName || "").trim();
     if (!userName) {
       setError("Name is required for Save to Publish.");
+      return;
+    }
+    const outputPath = String(publishSaveOutputPath || "").trim();
+    if (!outputPath) {
+      setError("Output path is required. Enter a URL/path or pick a local folder.");
       return;
     }
     setBusy(true);
     try {
       const fieldMappings = buildSaveToPublishFieldMappings();
-      // Client-side validation: required publish fields must be mapped.
-      const requiredKeys = (Array.isArray(publishFieldSchema) ? publishFieldSchema : [])
-        .filter((f) => !!f?.required)
-        .map((f) => String(f?.field_key || "").trim())
-        .filter(Boolean);
-      const mappedKeys = new Set((Array.isArray(fieldMappings) ? fieldMappings : []).map((m) => String(m?.field_key || "").trim()).filter(Boolean));
-      const missing = requiredKeys.filter((k) => !mappedKeys.has(k));
-      if (missing.length) {
-        setError(`Missing required field mapping(s): ${missing.join(", ")}. Add a source for each required field and try again.`);
-        return;
-      }
       const out = await request("POST", "/api/v1/publishing/save-to-publish", {
         project_id: projectId,
         platform,
         user_name: userName,
-        output_path: String(savePublishLocation || "").trim() || null,
+        output_path: outputPath,
         field_mappings: fieldMappings,
       });
       const savedPath = String(out?.output_path || "").trim();
       setPublishSaveMessage(savedPath ? `Saved to: ${savedPath}` : "Saved to publish.");
-      setShowSavePublishModal(false);
+      window.localStorage.setItem("cpublishr_publish_output_path", outputPath);
+      window.localStorage.setItem("cpublishr_publish_destination_mode", publishSaveDestinationMode);
+      setShowPublishSaveDialog(false);
     } catch (e) {
       setError(e.message || String(e));
     } finally {
       setBusy(false);
     }
   }
-
-  // Auto-seed required publish fields with at least one source row, and auto-pick an artifact when possible.
-  useEffect(() => {
-    if (!authToken || page !== "publish") return;
-    const fields = Array.isArray(publishFieldSchema) ? publishFieldSchema : [];
-    if (!fields.length) return;
-    const artifacts = Array.isArray(publishArtifacts) ? publishArtifacts : [];
-
-    setPublishFieldMappings((prev) => {
-      const next = { ...(prev && typeof prev === "object" ? prev : {}) };
-
-      for (const field of fields) {
-        const fieldKey = String(field?.field_key || "").trim();
-        if (!fieldKey) continue;
-
-        const accepted = Array.isArray(field?.accepted_artifact_formats)
-          ? field.accepted_artifact_formats.map((x) => String(x || "").trim()).filter(Boolean)
-          : [];
-        const best = accepted.length ? artifacts.find((a) => accepted.includes(String(a?.format || "").trim())) : null;
-        const bestId = String(best?.artifact_id || "").trim();
-
-        const rows = Array.isArray(next[fieldKey]) ? next[fieldKey] : [];
-        const required = !!field?.required;
-        const seededRows = rows.length ? rows.slice() : (required ? [makePublishSourceRow()] : []);
-        if (!seededRows.length) continue;
-
-        next[fieldKey] = seededRows.map((r) => {
-          const row = r && typeof r === "object" ? { ...r } : makePublishSourceRow();
-          if (!String(row.artifact_id || "").trim() && bestId) row.artifact_id = bestId;
-          const chosen = publishArtifactsById[String(row.artifact_id || "").trim()] || best || null;
-          if (!String(row.primary_part || "").trim()) row.primary_part = defaultPublishPartForArtifact(chosen);
-          return row;
-        });
-      }
-
-      return next;
-    });
-  }, [authToken, page, publishFieldSchema, publishArtifacts, publishArtifactsById]);
 
   function addPublishSourceRow(fieldKey) {
     setPublishFieldMappings((prev) => {
@@ -2058,6 +2392,158 @@ export default function App() {
     });
   }
 
+  function resetArtifactEditPanel() {
+    setArtifactEditMode("none");
+    setIsArtifactEditing(false);
+    setArtifactInlineText("");
+    setArtifactIterateInstruction("");
+  }
+
+  function hydrateIterateStateFromArtifact(artifact) {
+    const payload = artifact?.payload_json && typeof artifact.payload_json === "object" ? artifact.payload_json : {};
+    const settings = payload?.settings && typeof payload.settings === "object" ? payload.settings : {};
+    const styleByKind = settings?.style_settings_by_kind && typeof settings.style_settings_by_kind === "object"
+      ? settings.style_settings_by_kind
+      : {};
+    const styleByFormat = settings?.style_settings_by_format && typeof settings.style_settings_by_format === "object"
+      ? settings.style_settings_by_format
+      : {};
+    const kind = String(artifact?.kind || "").trim().toLowerCase();
+    const fmt = String(artifact?.format || "").trim();
+
+    if (kind === "text") {
+      const textStyle = styleByKind?.text && typeof styleByKind.text === "object" ? styleByKind.text : {};
+      const toneBase = toneBaseFromProjectTone(form.tone_preference);
+      const nextTone = makeDefaultToneNuance(toneBase);
+      const toneNuance = textStyle?.tone_nuance && typeof textStyle.tone_nuance === "object" ? textStyle.tone_nuance : {};
+      setArtifactIterateToneNuance({ ...nextTone, ...toneNuance, tone_base: toneBase });
+      setArtifactIterateFrameworkMode(String(toneNuance?.framework_mode || "light"));
+      const source = String(textStyle?.style_source || "").trim().toLowerCase() === "voice_profile" ? "voice_profile" : "manual";
+      setArtifactIterateStyleSource(source);
+      setArtifactIterateVoiceProfileId(String(textStyle?.voice_profile_id || form.voice_profile_id || "").trim());
+      setArtifactIterateManualCoreVoice(String(textStyle?.core_voice || "").trim());
+    }
+
+    if (kind === "image") {
+      const imageStyle = styleByKind?.image && typeof styleByKind.image === "object" ? styleByKind.image : {};
+      setArtifactIterateImageStyle((prev) => ({
+        ...prev,
+        ...imageStyle,
+        brand_colors: {
+          ...(prev?.brand_colors || {}),
+          ...(imageStyle?.brand_colors && typeof imageStyle.brand_colors === "object" ? imageStyle.brand_colors : {}),
+        },
+      }));
+    }
+
+    if (kind === "video" || kind === "gif") {
+      const videoStyleRaw = kind === "gif" ? styleByKind?.gif : styleByKind?.video;
+      const videoStyle = videoStyleRaw && typeof videoStyleRaw === "object" ? videoStyleRaw : {};
+      setArtifactIterateVideoStyle((prev) => ({
+        ...prev,
+        ...videoStyle,
+        brand_colors: {
+          ...(prev?.brand_colors || {}),
+          ...(videoStyle?.brand_colors && typeof videoStyle.brand_colors === "object" ? videoStyle.brand_colors : {}),
+        },
+      }));
+    }
+
+    if (fmt && styleByFormat?.[fmt] && typeof styleByFormat[fmt] === "object") {
+      setArtifactIterateFormatAdvanced((prev) => ({
+        ...prev,
+        [fmt]: {
+          ...(prev?.[fmt] || {}),
+          ...(styleByFormat[fmt] || {}),
+        },
+      }));
+    }
+  }
+
+  function startInlineArtifactEdit(artifact) {
+    const payload = artifact?.payload_json && typeof artifact.payload_json === "object" ? artifact.payload_json : {};
+    const body = typeof payload?.body === "string" ? payload.body : "";
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    const merged = body || items.map((x) => String(x?.text || "").trim()).filter(Boolean).join("\n");
+    setArtifactInlineText(merged);
+    setArtifactEditMode("inline");
+  }
+
+  function startIterateArtifactEdit(artifact) {
+    setArtifactIterateInstruction("");
+    hydrateIterateStateFromArtifact(artifact);
+    setArtifactEditMode("iterate");
+  }
+
+  async function refreshStoredArtifactsAfterEdit() {
+    const out = await request("GET", `/api/v1/artifacts/${form.project_id}`);
+    const items = Array.isArray(out?.artifacts) ? out.artifacts : [];
+    setStoredArtifacts(items);
+    const formats = uniqueStrings(items.map((a) => String(a?.format || "").trim()).filter(Boolean));
+    setStoredArtifactFormatsForProject(formats);
+    if (!formats.includes(selectedStoredFormat)) {
+      setSelectedStoredFormat(formats[0] || "");
+      setSelectedStoredArtifactTab(0);
+    }
+  }
+
+  async function onSaveInlineArtifactEdit() {
+    const artifactId = String(selectedStoredArtifact?.artifact_id || "").trim();
+    if (!artifactId) return;
+    setError("");
+    setIsArtifactEditing(true);
+    try {
+      await request("POST", "/api/v1/artifacts/edit", {
+        artifact_id: artifactId,
+        mode: "inline",
+        inline_content: String(artifactInlineText || ""),
+      });
+      await refreshStoredArtifactsAfterEdit();
+      resetArtifactEditPanel();
+      setMessage("Artifact updated inline.");
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setIsArtifactEditing(false);
+    }
+  }
+
+  async function onIterateArtifactEdit() {
+    const artifact = selectedStoredArtifact;
+    const artifactId = String(artifact?.artifact_id || "").trim();
+    if (!artifactId) return;
+    if (!(artifactIterateInstruction || "").trim()) {
+      setError("Edit Instruction is required for iterate.");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    const iterateKind = String(artifact?.kind || "").trim().toLowerCase();
+    if (iterateKind === "text" && artifactIterateStyleSource === "voice_profile" && !(artifactIterateVoiceProfileId || form.voice_profile_id || "").trim()) {
+      setError("Select a voice profile or switch to manual style.");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    setError("");
+    setIsArtifactEditing(true);
+    try {
+      await request("POST", "/api/v1/artifacts/edit", {
+        artifact_id: artifactId,
+        mode: "iterate",
+        edit_instruction: String(artifactIterateInstruction || "").trim(),
+        style_settings_by_kind: buildIterateKindStyleSettings(artifact),
+        style_settings_by_format: buildIterateFormatStyleOverrides(artifact),
+        source_blob_paths: getStoredArtifactSourceBlobPaths(artifact),
+      });
+      await refreshStoredArtifactsAfterEdit();
+      resetArtifactEditPanel();
+      setMessage("Artifact iterated successfully.");
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setIsArtifactEditing(false);
+    }
+  }
+
   function startEditingArtifactTitle(artifact) {
     const id = String(artifact?.artifact_id || "").trim();
     if (!id) return;
@@ -2074,6 +2560,7 @@ export default function App() {
   async function saveArtifactTitle(artifact) {
     const artifactId = String(artifact?.artifact_id || "").trim();
     if (!artifactId) return;
+    if (!editingArtifactTitleId || editingArtifactTitleId !== artifactId) return;
     setError("");
     setIsSavingArtifactTitle(true);
     try {
@@ -2107,7 +2594,35 @@ export default function App() {
     setSelectedArtifactFormats([]);
     setArtifactGenerateStep("formats");
     setArtifactStyleKindPanel("text");
+    resetArtifactEditPanel();
   }, [page]);
+
+  useEffect(() => {
+    resetArtifactEditPanel();
+  }, [selectedStoredFormat, selectedStoredArtifactTab]);
+
+  useEffect(() => {
+    if (!isArtifactEditActive) return;
+    autoResizeTextarea(artifactInlineTextareaRef.current);
+    autoResizeTextarea(artifactIterateInstructionTextareaRef.current);
+    autoResizeTextarea(artifactIterateVoiceStyleTextareaRef.current);
+  }, [
+    isArtifactEditActive,
+    artifactInlineText,
+    artifactIterateInstruction,
+    artifactIterateManualCoreVoice,
+    selectedStoredArtifact?.artifact_id,
+  ]);
+
+  useEffect(() => {
+    if (page !== "editorial") return;
+    if (editorMode === "inline") {
+      autoResizeTextarea(editorialInlineTextareaRef.current);
+    }
+    if (editorMode === "iterate") {
+      autoResizeTextarea(editorialFeedbackTextareaRef.current);
+    }
+  }, [page, editorMode, workingContent, feedbackText, selectedVersion?.version_number]);
 
   useEffect(() => {
     if (!artifactSelectedKinds.length) return;
@@ -2149,14 +2664,6 @@ export default function App() {
     setArtifactImageStyle((prev) => {
       const next = { ...prev };
       let changed = false;
-      if (!(String(prev?.theme || "").trim()) && seed.theme) {
-        next.theme = seed.theme;
-        changed = true;
-      }
-      if (!(String(prev?.subject_prompt || "").trim()) && seed.subject_prompt) {
-        next.subject_prompt = seed.subject_prompt;
-        changed = true;
-      }
       if ((!String(prev?.palette_mode || "").trim() || String(prev?.palette_mode) === "muted") && seed.palette_mode) {
         next.palette_mode = seed.palette_mode;
         changed = true;
@@ -2170,14 +2677,6 @@ export default function App() {
     setArtifactVideoStyle((prev) => {
       const next = { ...prev };
       let changed = false;
-      if (!(String(prev?.theme || "").trim()) && seed.theme) {
-        next.theme = seed.theme;
-        changed = true;
-      }
-      if (!(String(prev?.subject_prompt || "").trim()) && seed.subject_prompt) {
-        next.subject_prompt = seed.subject_prompt;
-        changed = true;
-      }
       if ((!String(prev?.palette_mode || "").trim() || String(prev?.palette_mode) === "muted") && seed.palette_mode) {
         next.palette_mode = seed.palette_mode;
         changed = true;
@@ -2189,52 +2688,6 @@ export default function App() {
       return changed ? next : prev;
     });
   }, [latestProjectImageStyleSeed]);
-
-  useEffect(() => {
-    const hasMediaStyleConsumer =
-      artifactSelectedKinds.includes("image") || artifactSelectedKinds.includes("video") || artifactSelectedKinds.includes("gif");
-    if (page !== "artifacts" || artifactsViewMode !== "generate" || artifactGenerateStep !== "style" || !hasMediaStyleConsumer) {
-      return;
-    }
-    const defaultTheme = String(form.topic_title || "").trim();
-    const defaultSubject = String(form.core_idea || "").trim();
-    if (!defaultTheme && !defaultSubject) return;
-
-    setArtifactImageStyle((prev) => {
-      const next = { ...prev };
-      let changed = false;
-      if (!String(prev?.theme || "").trim() && defaultTheme) {
-        next.theme = defaultTheme;
-        changed = true;
-      }
-      if (!String(prev?.subject_prompt || "").trim() && defaultSubject) {
-        next.subject_prompt = defaultSubject;
-        changed = true;
-      }
-      return changed ? next : prev;
-    });
-
-    setArtifactVideoStyle((prev) => {
-      const next = { ...prev };
-      let changed = false;
-      if (!String(prev?.theme || "").trim() && defaultTheme) {
-        next.theme = defaultTheme;
-        changed = true;
-      }
-      if (!String(prev?.subject_prompt || "").trim() && defaultSubject) {
-        next.subject_prompt = defaultSubject;
-        changed = true;
-      }
-      return changed ? next : prev;
-    });
-  }, [
-    page,
-    artifactsViewMode,
-    artifactGenerateStep,
-    artifactSelectedKinds,
-    form.topic_title,
-    form.core_idea,
-  ]);
 
   useEffect(() => {
     setArtifactToneNuance((prev) => {
@@ -2375,20 +2828,105 @@ export default function App() {
     }
   }, [approvedActiveVoiceProfileOptions]);
 
+  useEffect(() => {
+    if (!platformTargets.length) {
+      setForm((prev) => ({ ...prev, distribution_targets: [] }));
+      setVpCreateForm((prev) => ({ ...prev, platforms: [] }));
+      return;
+    }
+    setForm((prev) => {
+      const current = Array.isArray(prev.distribution_targets) ? prev.distribution_targets : [];
+      const filtered = current.filter((x) => platformTargets.includes(String(x || "").trim()));
+      return { ...prev, distribution_targets: filtered };
+    });
+    setVpCreateForm((prev) => {
+      const current = Array.isArray(prev.platforms) ? prev.platforms : [];
+      const filtered = current.filter((x) => platformTargets.includes(String(x || "").trim()));
+      return { ...prev, platforms: filtered.length ? filtered : [platformTargets[0]] };
+    });
+  }, [platformTargets]);
+
+  const showWorkflowRegion = !isAuthenticated || (page !== "settings" && page !== "projects");
+
   return (
-    <div className="container">
-      <div className="card">
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h1>Publishr</h1>
-          {isAuthenticated ? (
-            <div className="row">
-              <button className="secondary" disabled={busy} onClick={() => setPage("settings")}>Settings</button>
-              <button className="secondary" disabled={busy} onClick={onLogout}>Logout</button>
+    <>
+      <div className="top-banner">
+        <div className="container top-banner-inner">
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <div className="top-banner-brand">
+              <img
+                src={publishrLogo}
+                alt="Publishr logo"
+                className="top-banner-logo"
+              />
             </div>
-          ) : null}
+            {isAuthenticated ? (
+              <div className="top-banner-actions">
+                <div className="row top-banner-buttons">
+                  {(page !== "projects" && page !== "settings") ? (
+                    <button className="secondary" disabled={busy} onClick={() => setPage("projects")}>Projects</button>
+                  ) : null}
+                  {page === "settings" ? (
+                    <button
+                      className="secondary"
+                      disabled={busy}
+                      onClick={() => {
+                        if (isExistingProjectFlow) {
+                          onOpenEditorialPage().catch(() => {});
+                          return;
+                        }
+                        setPage("setup");
+                      }}
+                    >
+                      Back to Workflow
+                    </button>
+                  ) : null}
+                  {page !== "settings" ? (
+                    <button className="secondary" disabled={busy} onClick={() => setPage("settings")}>Settings</button>
+                  ) : null}
+                  <button className="secondary" disabled={busy} onClick={onLogout}>Logout</button>
+                </div>
+                <span className="note top-banner-user">User ID: {currentUser?.user_id || "-"}</span>
+              </div>
+            ) : null}
+          </div>
         </div>
-        <p className="note">Lightweight React interface for Node 0-3 flow with editorial actions.</p>
-        <div className="grid two">
+      </div>
+
+      <div className="container">
+        {isAuthenticated && page === "projects" ? (
+          <div className="card">
+            <div className="row" style={{ justifyContent: "space-between", marginBottom: "10px" }}>
+              <h3 style={{ margin: 0 }}>Created Projects</h3>
+              <button className="secondary" disabled={busy} onClick={onCreateNewProject}>+ Create New Project</button>
+            </div>
+            {isProjectsLoading ? <p className="note">Loading projects...</p> : null}
+            {!isProjectsLoading && userProjects.length === 0 ? <p className="note">No projects found.</p> : null}
+            <div className="row">
+              {userProjects.map((p) => {
+                const projectId = String(p?.project_id || "").trim();
+                if (!projectId) return null;
+                return (
+                  <button
+                    key={`project-list-${projectId}`}
+                    className={form.project_id === projectId ? "primary" : "secondary"}
+                    disabled={busy}
+                    onClick={() => onSelectExistingProject(projectId)}
+                  >
+                    {projectId}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {(showWorkflowRegion || topBannerMessage || error || isGenerating || isArtifactGenerating || isStoredArtifactsLoading) ? (
+          <div className="card">
+            {showWorkflowRegion ? (
+              <>
+                <p className="note">Lightweight React interface for Node 0-3 flow with editorial actions.</p>
+                <div className="grid two">
           <div>
             <label>Backend Base URL</label>
             <input value={apiBaseUrl} onChange={(e) => setApiBaseUrl(e.target.value)} />
@@ -2432,26 +2970,19 @@ export default function App() {
               <div>
                 <label>Project ID</label>
                 <input
-                  list="user-project-ids"
                   value={form.project_id}
-                  onChange={(e) => setForm({ ...form, project_id: e.target.value })}
+                  onChange={(e) => onNewProjectIdChange(e.target.value)}
+                  placeholder="Enter a new project ID"
                 />
-                <datalist id="user-project-ids">
-                  {userProjects.map((p) => (
-                    <option key={p.project_id} value={p.project_id} />
-                  ))}
-                </datalist>
                 {page === "setup" && isProjectsLoading ? (
                   <p className="note" style={{ marginTop: "6px" }}>Loading your projects...</p>
                 ) : null}
                 {page === "setup" && hasExistingContent ? (
                   <div className="row" style={{ marginTop: "8px" }}>
-                    <button className="secondary" disabled={busy || isCheckingProjectData} onClick={onRetrieveContent}>
-                      Retrieve Content
-                    </button>
                     <button
+                      type="button"
                       className="primary"
-                      disabled={busy || isCheckingProjectData}
+                      disabled={busy || isCheckingProjectData || !canGenerateContent}
                       onClick={() => setShowGenerateSetupForm(true)}
                     >
                       Generate Content
@@ -2465,33 +2996,43 @@ export default function App() {
               <div>
                 <label>Workflow Pages</label>
                 <div className="row">
-                  <button className={page === "setup" ? "primary" : "secondary"} disabled={busy} onClick={() => setPage("setup")}>Setup</button>
-                  <button className={page === "editorial" ? "primary" : "secondary"} disabled={busy} onClick={() => setPage("editorial")}>Editorial</button>
+                  {!isExistingProjectFlow ? (
+                    <button className={page === "setup" ? "primary" : "secondary"} disabled={busy} onClick={() => setPage("setup")}>Setup</button>
+                  ) : null}
+                  <button className={page === "editorial" ? "primary" : "secondary"} disabled={busy} onClick={onOpenEditorialPage}>Editorial</button>
                   <button className={page === "artifacts" ? "primary" : "secondary"} disabled={busy} onClick={() => setPage("artifacts")}>Artifacts</button>
                   <button className={page === "publish" ? "primary" : "secondary"} disabled={busy} onClick={() => setPage("publish")}>Publish</button>
                 </div>
               </div>
+              </>
+            )}
+            </div>
             </>
-          )}
-        </div>
-        {message ? <div className="status ok">{message}</div> : null}
-        {error ? <div className="status warn">{error}</div> : null}
-        {(isGenerating || isArtifactGenerating || isStoredArtifactsLoading) ? (
-          <div style={{ marginTop: "10px" }}>
-            <div className="progress-label">
-              {isGenerating
-                ? `Generating content (Node 0-2): ${nodeProgress}%`
-                : (isArtifactGenerating ? "Generating artifacts..." : "Loading stored artifacts...")}
-            </div>
-            <div className="progress-track">
-              <div
-                className={`progress-fill ${isGenerating ? "" : "indeterminate"}`}
-                style={isGenerating ? { width: `${nodeProgress}%` } : { width: "35%" }}
-              />
-            </div>
+          ) : null}
+            {topBannerMessage ? <div className="status ok">{topBannerMessage}</div> : null}
+            {error ? <div className="status warn">{error}</div> : null}
+            {(isGenerating || isArtifactGenerating || isStoredArtifactsLoading) ? (
+              <div style={{ marginTop: "10px" }}>
+                <div className="progress-label">
+                  {isGenerating
+                    ? `Generating content (Node 0-2): ${nodeProgress}%`
+                    : (isArtifactGenerating ? "Generating artifacts..." : "Loading stored artifacts...")}
+                </div>
+                {isArtifactGenerating && selectedArtifactFormats.some((f) => ["post_image","thumbnail","banner","cover"].includes(f)) && (
+                  <div style={{ fontSize: "0.82em", color: "#888", marginTop: "4px" }}>
+                    Image and video generation may take a while — please hang on.
+                  </div>
+                )}
+                <div className="progress-track">
+                  <div
+                    className={`progress-fill ${isGenerating ? "" : "indeterminate"}`}
+                    style={isGenerating ? { width: `${nodeProgress}%` } : { width: "35%" }}
+                  />
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
-      </div>
 
       {isAuthenticated && page === "setup" && showGenerateSetupForm && (
         <div className="card">
@@ -2499,21 +3040,24 @@ export default function App() {
           <div className="grid two">
             <div>
               <LabelWithTooltip
-                text="Topic Title (required)"
+                text="Topic Title"
+                required
                 tooltip="A short headline for your post idea. Keep it simple and specific—this is used to name and organize your content."
               />
-              <input value={form.topic_title} onChange={(e) => setForm({ ...form, topic_title: e.target.value })} />
+              <input value={form.topic_title} onChange={(e) => setForm({ ...form, topic_title: e.target.value })} placeholder={TOPIC_TITLE_SUGGESTION} />
             </div>
             <div>
               <LabelWithTooltip
-                text="Core Idea (required)"
+                text="Core Idea"
+                required
                 tooltip="The one-sentence point you want to make. If someone reads only this, they should understand your main message."
               />
-              <input value={form.core_idea} onChange={(e) => setForm({ ...form, core_idea: e.target.value })} />
+              <input value={form.core_idea} onChange={(e) => setForm({ ...form, core_idea: e.target.value })} placeholder={CORE_IDEA_SUGGESTION} />
             </div>
             <div>
               <LabelWithTooltip
-                text="Target Audience (required)"
+                text="Target Audience"
+                required
                 tooltip="Who you’re writing for. Pick the closest match—this helps choose the right language, examples, and assumptions."
               />
               <select
@@ -2525,7 +3069,7 @@ export default function App() {
             </div>
             <div>
               <LabelWithTooltip
-                text="Target Audience Notes (optional)"
+                text="Target Audience Notes"
                 tooltip="Optional. Add specifics about your audience (role, industry, constraints). The more specific this is, the more accurate the output will be."
               />
               <input
@@ -2539,8 +3083,8 @@ export default function App() {
                 text="Audience Familiarity"
                 tooltip={"How familiar your audience is with this topic.\nNew: new to the topic\nSomewhat familiar: knows basics\nVery familiar: deep understanding"}
               />
-              <select value={form.audience_familiarity} onChange={(e) => setForm({ ...form, audience_familiarity: e.target.value || "" })}>
-                {AUDIENCE_FAMILIARITY_OPTIONS.map((x) => <option key={x.value || "none"} value={x.value}>{x.label}</option>)}
+              <select value={form.audience_familiarity} onChange={(e) => setForm({ ...form, audience_familiarity: e.target.value })}>
+                {AUDIENCE_FAMILIARITY_OPTIONS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
               </select>
             </div>
             <div>
@@ -2548,13 +3092,14 @@ export default function App() {
                 text="Detail Level"
                 tooltip={"How detailed you want the content.\nQuick take: summary\nPractical: actionable depth\nDeep dive: thorough coverage with nuances"}
               />
-              <select value={form.detail_level} onChange={(e) => setForm({ ...form, detail_level: e.target.value || null })}>
-                {DETAIL_LEVEL_OPTIONS.map((x) => <option key={x.value || "none"} value={x.value}>{x.label}</option>)}
+              <select value={form.detail_level} onChange={(e) => setForm({ ...form, detail_level: e.target.value })}>
+                {DETAIL_LEVEL_OPTIONS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
               </select>
             </div>
             <div>
               <LabelWithTooltip
-                text="Tone Preference (required)"
+                text="Tone Preference"
+                required
                 tooltip="The “voice” of the writing—how it should sound. Example: conversational, formal, witty, bold, etc."
               />
               <select value={form.tone_preference} onChange={(e) => setForm({ ...form, tone_preference: e.target.value })}>
@@ -2564,7 +3109,7 @@ export default function App() {
             <div>
               <LabelWithTooltip
                 text="Stance"
-                tooltip={"The point of view you want to take.\nSupportive: agree/advocate\nNeutral: informative, balanced\nContrarian: challenge the common view\nBalanced: show both sides and conclude"}
+                tooltip={"The point of view you want to take.\nSupportive: agree/advocate\nContrarian: challenge the common view\nBalanced: show both sides and conclude"}
               />
               <select value={form.stance} onChange={(e) => setForm({ ...form, stance: e.target.value || "balanced" })}>
                 {STANCE_OPTIONS.map((x) => <option key={x} value={x}>{x}</option>)}
@@ -2575,8 +3120,8 @@ export default function App() {
                 text="Primary Goal"
                 tooltip="What you want this content to achieve. Example: educate, entertain, promote something, start a discussion, or drive sign-ups."
               />
-              <select value={form.primary_goal} onChange={(e) => setForm({ ...form, primary_goal: e.target.value || "" })}>
-                {PRIMARY_GOAL_OPTIONS.map((x) => <option key={x || "none"} value={x}>{x || "(none)"}</option>)}
+              <select value={form.primary_goal} onChange={(e) => setForm({ ...form, primary_goal: e.target.value })}>
+                {PRIMARY_GOAL_OPTIONS.map((x) => <option key={x} value={x}>{x}</option>)}
               </select>
             </div>
             <div>
@@ -2584,13 +3129,30 @@ export default function App() {
                 text="Desired Action"
                 tooltip="What you want people to do after reading. Example: comment, share, follow, click a link, DM you, subscribe, or buy."
               />
-              <select value={form.desired_action} onChange={(e) => setForm({ ...form, desired_action: e.target.value || "" })}>
-                {DESIRED_ACTION_OPTIONS.map((x) => <option key={x || "none"} value={x}>{x || "(none)"}</option>)}
+              <select value={form.desired_action} onChange={(e) => setForm({ ...form, desired_action: e.target.value })}>
+                {DESIRED_ACTION_OPTIONS.map((x) => <option key={x} value={x}>{x}</option>)}
               </select>
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <LabelWithTooltip
+                text="User Content"
+                tooltip="Any raw notes you already have - bullets, a rough draft, links, or context. The more specific this is, the more accurate the output will be."
+              />
+              <textarea
+                ref={userContentTextareaRef}
+                value={form.user_content || ""}
+                onFocus={(e) => autoResizeTextarea(e.target)}
+                onChange={(e) => {
+                  setForm({ ...form, user_content: e.target.value });
+                  autoResizeTextarea(e.target);
+                }}
+                placeholder={USER_CONTENT_SUGGESTION}
+              />
             </div>
             <div>
               <LabelWithTooltip
                 text="Voice Profile"
+                required
                 tooltip="Select from approved active voice profiles by name. The mapped voice_profile_id is sent to backend."
               />
               <select
@@ -2610,11 +3172,11 @@ export default function App() {
             </div>
             <div>
               <LabelWithTooltip
-                text="Distribution Targets (optional)"
+                text="Distribution Targets"
                 tooltip="Where you might publish this. This doesn’t change the core idea—just helps us prepare formats that fit those platforms later."
               />
               <div className="row">
-                {TARGETS.map((t) => (
+                {platformTargets.map((t) => (
                   <label key={t} className="tag">
                     <input
                       type="checkbox"
@@ -2628,22 +3190,13 @@ export default function App() {
               </div>
             </div>
           </div>
-          <LabelWithTooltip
-            text="Constraints (JSON object, optional)"
-            tooltip="Optional rules to guide the output. Use this to enforce must-have points, avoid certain phrases, or add compliance notes. Example keys: must_include, must_avoid, forbidden_claims, compliance_notes, sensitive_topics."
-          />
-          <textarea
-            value={constraintsText}
-            onChange={(e) => setConstraintsText(e.target.value)}
-            placeholder='{"must_include":["..."],"must_avoid":["..."],"forbidden_claims":[],"compliance_notes":"","sensitive_topics":[]}'
-          />
-          <LabelWithTooltip
-            text="User Content (optional)"
-            tooltip="Any raw notes you already have—bullets, a rough draft, links, or context. The more specific this is, the more accurate the output will be."
-          />
-          <textarea value={form.user_content || ""} onChange={(e) => setForm({ ...form, user_content: e.target.value })} />
           <div className="row" style={{ marginTop: "12px" }}>
-            <button className="primary" disabled={busy || isCheckingProjectData} onClick={onGenerateContent}>
+            <button
+              type="button"
+              className="primary"
+              disabled={busy || isCheckingProjectData || !canGenerateContent}
+              onClick={onGenerateContent}
+            >
               {isGenerating ? "Generating..." : "Generate Content"}
             </button>
             {canContinueToEditorial ? (
@@ -2680,160 +3233,185 @@ export default function App() {
       {isAuthenticated && page === "settings" && (
         <>
           <div className="card">
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <h2>Voice Profile Settings</h2>
-              <button className="secondary" disabled={busy} onClick={() => setPage("setup")}>Back to Workflow</button>
-            </div>
+            <h2 style={{ marginBottom: 0 }}>Voice Profile Settings</h2>
             {!authToken ? (
               <p className="note">Login first to access voice profile APIs.</p>
             ) : null}
           </div>
 
           <div className="card">
-            <h3>Create Collection</h3>
-            <div className="grid two">
-              <div>
-                <label>Voice Profile Name</label>
-                <input
-                  value={vpCreateForm.voice_profile_name}
-                  onChange={(e) => setVpCreateForm((prev) => ({ ...prev, voice_profile_name: e.target.value }))}
-                />
-              </div>
-              <div>
-                <label>Platforms</label>
-                <div className="row">
-                  {TARGETS.map((p) => (
-                    <label key={`vp-platform-${p}`} className="tag">
-                      <input
-                        type="checkbox"
-                        checked={(vpCreateForm.platforms || []).includes(p)}
-                        onChange={() => toggleVpPlatform(p)}
-                        style={{ width: "auto", marginRight: "6px" }}
-                      />
-                      {p}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="row" style={{ marginTop: "10px" }}>
-              <button className="primary" disabled={busy || !authToken} onClick={onVpCreateCollection}>Create Collection</button>
-              <button className="secondary" disabled={busy || !authToken} onClick={() => loadVpCollections().catch(() => {})}>Refresh</button>
-            </div>
-          </div>
-
-          <div className="card">
-            <h3>Collections</h3>
-            {vpCollections.length === 0 ? <p className="note">No voice profile collections found.</p> : null}
-            <div className="row">
-              {vpCollections.map((c) => (
+            <div className="row" style={{ justifyContent: "space-between", marginBottom: "10px" }}>
+              <h3 style={{ margin: 0 }}>Collections</h3>
+              {showVpCreateCollectionForm ? (
                 <button
-                  key={c.voice_profile_id}
-                  className={vpSelectedCollectionId === c.voice_profile_id ? "primary" : "secondary"}
-                  onClick={() => setVpSelectedCollectionId(c.voice_profile_id)}
+                  className="secondary"
+                  disabled={busy || !authToken}
+                  onClick={() => {
+                    setShowVpCreateCollectionForm(false);
+                    setVpCreateForm({ voice_profile_name: "", platforms: ["linkedin"] });
+                  }}
                 >
-                  {c.voice_profile_name}
+                  Cancel
                 </button>
-              ))}
+              ) : (
+                <button className="secondary" disabled={busy || !authToken} onClick={() => setShowVpCreateCollectionForm(true)}>Create Collection</button>
+              )}
             </div>
-            {vpSelectedCollectionId ? (
-              <p className="note" style={{ marginTop: "8px" }}>Selected collection id: {vpSelectedCollectionId}</p>
-            ) : null}
-          </div>
-
-          <div className="card">
-            <h3>Generate Voice Profile Version</h3>
-            <div>
-              <label>Intended Use</label>
-              <input
-                value={vpGenerateForm.intended_use}
-                onChange={(e) => setVpGenerateForm((prev) => ({ ...prev, intended_use: e.target.value }))}
-                placeholder="drafting / analysis / coaching"
-              />
-            </div>
-            {(vpGenerateForm.datasets || []).map((row, idx) => (
-              <div key={`vp-ds-${idx}`} className="card" style={{ marginTop: "12px", marginBottom: 0 }}>
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <h3 style={{ marginBottom: 0 }}>Dataset {idx + 1}</h3>
-                  <button className="danger" onClick={() => removeVpDatasetRow(idx)} disabled={vpGenerateForm.datasets.length <= 1}>Remove</button>
-                </div>
-                <div className="grid two" style={{ marginTop: "8px" }}>
+            {showVpCreateCollectionForm ? (
+              <>
+                <div className="grid two">
                   <div>
-                    <label>Dataset Name</label>
-                    <input value={row.dataset_name || ""} onChange={(e) => updateVpDatasetRow(idx, "dataset_name", e.target.value)} />
-                  </div>
-                  <div>
-                    <label>Source Profile (optional)</label>
-                    <input value={row.source_profile || ""} onChange={(e) => updateVpDatasetRow(idx, "source_profile", e.target.value)} />
-                  </div>
-                  <div>
-                    <label>Blob Prefix</label>
+                    <label>Collection Name</label>
                     <input
-                      value={row.blob_prefix || ""}
-                      onChange={(e) => updateVpDatasetRow(idx, "blob_prefix", e.target.value)}
-                      placeholder="user_id/dataset_name/ (or full blob URL)"
+                      value={vpCreateForm.voice_profile_name}
+                      onChange={(e) => setVpCreateForm((prev) => ({ ...prev, voice_profile_name: e.target.value }))}
                     />
                   </div>
+                  <div>
+                    <label>Platforms</label>
+                    <div className="row">
+                      {platformTargets.map((p) => (
+                        <label key={`vp-platform-${p}`} className="tag">
+                          <input
+                            type="checkbox"
+                            checked={(vpCreateForm.platforms || []).includes(p)}
+                            onChange={() => toggleVpPlatform(p)}
+                            style={{ width: "auto", marginRight: "6px" }}
+                          />
+                          {p}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-                <div style={{ marginTop: "8px" }}>
-                  <label>Sample Scope Note (optional)</label>
-                  <textarea value={row.sample_scope_note || ""} onChange={(e) => updateVpDatasetRow(idx, "sample_scope_note", e.target.value)} />
+                <div className="row" style={{ marginTop: "10px" }}>
+                  <button className="primary" disabled={busy || !authToken} onClick={onVpCreateCollection}>Create Collection</button>
                 </div>
-              </div>
-            ))}
-            <div className="row" style={{ marginTop: "10px" }}>
-              <button className="secondary" disabled={busy || !authToken} onClick={addVpDatasetRow}>Add Another Dataset</button>
-              <button className="primary" disabled={busy || !authToken || !vpSelectedCollectionId} onClick={onVpGenerateVersion}>
-                {isVpGenerating ? "Generating Version..." : "Generate Version"}
-              </button>
-            </div>
-            <p className="note" style={{ marginTop: "8px" }}>
-              Dataset ID is system-generated by backend. Add another dataset only if one version should learn from multiple sources.
-            </p>
-            <p className="note" style={{ marginTop: "6px" }}>
-              Blob Prefix should point inside container `profile-entries` (for example `ckashyap/Top_Posts/`).
-            </p>
-            {isVpGenerating ? (
-              <div style={{ marginTop: "10px" }}>
-                <div className="progress-label">Generating voice profile version...</div>
-                <div className="progress-track">
-                  <div className="progress-fill indeterminate" style={{ width: "35%" }} />
+              </>
+            ) : (
+              <>
+                {vpCollections.length === 0 ? <p className="note">No voice profile collections found.</p> : null}
+                <div className="row">
+                  {vpCollections.map((c) => (
+                    <button
+                      key={c.voice_profile_id}
+                      className={vpSelectedCollectionId === c.voice_profile_id ? "primary" : "secondary"}
+                      onClick={() => onSelectVpCollection(c.voice_profile_id)}
+                    >
+                      {c.voice_profile_name}
+                    </button>
+                  ))}
                 </div>
-              </div>
-            ) : null}
+                {vpSelectedCollectionId ? (
+                  <p className="note" style={{ marginTop: "8px" }}>Selected collection id: {vpSelectedCollectionId}</p>
+                ) : null}
+              </>
+            )}
           </div>
 
-          <div className="card">
-            <h3>Version Controls</h3>
-            {!vpCollectionDetail?.versions?.length ? <p className="note">No versions available for selected collection.</p> : null}
-            <div className="row">
-              {(vpCollectionDetail?.versions || []).map((v) => (
-                <button
-                  key={v.voice_profile_version_id}
-                  className={vpSelectedVersionId === v.voice_profile_version_id ? "primary" : "secondary"}
-                  onClick={() => setVpSelectedVersionId(v.voice_profile_version_id)}
-                >
-                  v{v.version_no} {v.is_active ? "(active)" : ""}
-                </button>
+          {vpSelectedCollectionId && !showVpVersionControls ? (
+            <div className="card">
+              <div className="row" style={{ justifyContent: "space-between", marginBottom: "10px" }}>
+                <h3 style={{ margin: 0 }}>Generate Voice Profile Version</h3>
+                <button className="secondary" disabled={busy} onClick={() => setShowVpVersionControls(true)}>View existing</button>
+              </div>
+              <div>
+                <label>Intended Use</label>
+                <input
+                  value={vpGenerateForm.intended_use}
+                  onChange={(e) => setVpGenerateForm((prev) => ({ ...prev, intended_use: e.target.value }))}
+                  placeholder="drafting / analysis / coaching"
+                />
+              </div>
+              {(vpGenerateForm.datasets || []).map((row, idx) => (
+                <div key={`vp-ds-${idx}`} className="card" style={{ marginTop: "12px", marginBottom: 0 }}>
+                  <div className="row" style={{ justifyContent: "space-between" }}>
+                    <h3 style={{ marginBottom: 0 }}>Dataset {idx + 1}</h3>
+                    <button className="danger" onClick={() => removeVpDatasetRow(idx)} disabled={vpGenerateForm.datasets.length <= 1}>Remove</button>
+                  </div>
+                  <div className="grid two" style={{ marginTop: "8px" }}>
+                    <div>
+                      <label>Dataset Name</label>
+                      <input value={row.dataset_name || ""} onChange={(e) => updateVpDatasetRow(idx, "dataset_name", e.target.value)} />
+                    </div>
+                    <div>
+                      <label>Source Profile (optional)</label>
+                      <input value={row.source_profile || ""} onChange={(e) => updateVpDatasetRow(idx, "source_profile", e.target.value)} />
+                    </div>
+                    <div>
+                      <label>Blob Prefix</label>
+                      <input
+                        value={row.blob_prefix || ""}
+                        onChange={(e) => updateVpDatasetRow(idx, "blob_prefix", e.target.value)}
+                        placeholder="user_id/dataset_name/ (or full blob URL)"
+                      />
+                    </div>
+                  </div>
+                  <div style={{ marginTop: "8px" }}>
+                    <label>Sample Scope Note (optional)</label>
+                    <textarea value={row.sample_scope_note || ""} onChange={(e) => updateVpDatasetRow(idx, "sample_scope_note", e.target.value)} />
+                  </div>
+                </div>
               ))}
+              <div className="row" style={{ marginTop: "10px" }}>
+                <button className="secondary" disabled={busy || !authToken} onClick={addVpDatasetRow}>Add Another Dataset</button>
+                <button className="primary" disabled={busy || !authToken || !vpSelectedCollectionId} onClick={onVpGenerateVersion}>
+                  {isVpGenerating ? "Generating Version..." : "Generate Version"}
+                </button>
+              </div>
+              <p className="note" style={{ marginTop: "8px" }}>
+                Dataset ID is system-generated by backend. Add another dataset only if one version should learn from multiple sources.
+              </p>
+              <p className="note" style={{ marginTop: "6px" }}>
+                Blob Prefix should point inside container `profile-entries` (for example `ckashyap/Top_Posts/`).
+              </p>
+              {isVpGenerating ? (
+                <div style={{ marginTop: "10px" }}>
+                  <div className="progress-label">Generating voice profile version...</div>
+                  <div className="progress-track">
+                    <div className="progress-fill indeterminate" style={{ width: "35%" }} />
+                  </div>
+                </div>
+              ) : null}
             </div>
-            <div className="row" style={{ marginTop: "10px" }}>
-              <button className="primary" disabled={busy || !authToken || !vpSelectedVersionId} onClick={onVpActivateVersion}>Activate Selected Version</button>
-              <input
-                style={{ maxWidth: "240px" }}
-                value={vpStatusInput}
-                onChange={(e) => setVpStatusInput(e.target.value)}
-                placeholder="approved / rejected / generated"
-              />
-              <button className="secondary" disabled={busy || !authToken || !vpSelectedVersionId} onClick={onVpUpdateStatus}>Update Status</button>
+          ) : null}
+
+          {vpSelectedCollectionId && showVpVersionControls ? (
+            <div className="card">
+              <div className="row" style={{ justifyContent: "space-between", marginBottom: "10px" }}>
+                <h3 style={{ margin: 0 }}>Version Controls</h3>
+                <button className="secondary" disabled={busy} onClick={() => setShowVpVersionControls(false)}>Back to Generate</button>
+              </div>
+              {!vpCollectionDetail?.versions?.length ? <p className="note">No versions available for selected collection.</p> : null}
+              <div className="row">
+                {(vpCollectionDetail?.versions || []).map((v) => (
+                  <button
+                    key={v.voice_profile_version_id}
+                    className={vpSelectedVersionId === v.voice_profile_version_id ? "primary" : "secondary"}
+                    onClick={() => setVpSelectedVersionId(v.voice_profile_version_id)}
+                  >
+                    v{v.version_no} {v.is_active ? "(active)" : ""}
+                  </button>
+                ))}
+              </div>
+              <div className="row" style={{ marginTop: "10px" }}>
+                <button className="primary" disabled={busy || !authToken || !vpSelectedVersionId} onClick={onVpActivateVersion}>Activate Selected Version</button>
+                <input
+                  style={{ maxWidth: "240px" }}
+                  value={vpStatusInput}
+                  onChange={(e) => setVpStatusInput(e.target.value)}
+                  placeholder="approved / rejected / generated"
+                />
+                <button className="secondary" disabled={busy || !authToken || !vpSelectedVersionId} onClick={onVpUpdateStatus}>Update Status</button>
+              </div>
+              {vpVersionDetail ? (
+                <>
+                  <h3 style={{ marginTop: "14px" }}>Version Detail</h3>
+                  <pre className="content">{JSON.stringify(vpVersionDetail, null, 2)}</pre>
+                </>
+              ) : null}
             </div>
-            {vpVersionDetail ? (
-              <>
-                <h3 style={{ marginTop: "14px" }}>Version Detail</h3>
-                <pre className="content">{JSON.stringify(vpVersionDetail, null, 2)}</pre>
-              </>
-            ) : null}
-          </div>
+          ) : null}
         </>
       )}
 
@@ -2852,60 +3430,80 @@ export default function App() {
                 ))}
               </select>
             </div>
-            <div className="note">
-              <p>Selected kind: <strong>{selectedVersion?.version_kind || "-"}</strong></p>
-              <p>Variant label: <strong>{selectedVersion?.variant_label || "-"}</strong></p>
-              <p>Stage: <strong>{selectedVersion?.version_stage || "-"}</strong></p>
+            <div className="note row" style={{ gap: "16px", alignItems: "center", flexWrap: "wrap" }}>
+              <span>Selected kind: <strong>{selectedVersion?.version_kind || "-"}</strong></span>
+              <span>Variant label: <strong>{selectedVersion?.variant_label || "-"}</strong></span>
+              <span>Stage: <strong>{selectedVersion?.version_stage || "-"}</strong></span>
             </div>
           </div>
 
           {selectedVersion && (
             <>
-              <div className="split">
+              <div className={`split editorial-split ${editorMode !== "none" ? "editorial-split-inline" : ""}`}>
                 <div>
                   <h3>Content</h3>
                   {editorMode === "inline" ? (
                     <>
-                      <textarea value={workingContent} onChange={(e) => setWorkingContent(e.target.value)} />
+                      <textarea
+                        ref={editorialInlineTextareaRef}
+                        className="editorial-edit-textarea"
+                        value={workingContent}
+                        onChange={(e) => {
+                          setWorkingContent(e.target.value);
+                          autoResizeTextarea(e.target);
+                        }}
+                      />
                       <div className="row" style={{ marginTop: "8px" }}>
+                        <button className="secondary" disabled={busy} onClick={onCancelEditorialEdit}>Cancel</button>
                         <button className="secondary" disabled={busy} onClick={onSaveInline}>Save</button>
                         <button className="primary" disabled={busy} onClick={onFinalizeFromInline}>Finalize Content</button>
                       </div>
                     </>
                   ) : (
                     <>
-                      <pre className="content">{selectedVersion.content || ""}</pre>
-                      <div className="row" style={{ marginTop: "8px" }}>
-                        <button
-                          className="secondary"
-                          disabled={busy}
-                          onClick={() => {
-                            setWorkingContent(selectedVersion.content || "");
-                            setEditorMode("inline");
-                          }}
-                        >
-                          Edit Inline
-                        </button>
-                        <button
-                          className="secondary"
-                          disabled={busy}
-                          onClick={() => {
-                            setFeedbackPreviewContent("");
-                            setEditorMode("iterate");
-                          }}
-                        >
-                          Iterate
-                        </button>
-                        <button className="primary" disabled={busy} onClick={onFinalizeSelected}>
-                          Finalize Selected
-                        </button>
-                      </div>
+                      <pre className="content editorial-content-block">{selectedVersion.content || ""}</pre>
+                      {editorMode === "none" ? (
+                        <div className="row" style={{ marginTop: "8px" }}>
+                          <button
+                            className="secondary"
+                            disabled={busy}
+                            onClick={() => {
+                              setWorkingContent(selectedVersion.content || "");
+                              setEditorMode("inline");
+                            }}
+                          >
+                            Edit Inline
+                          </button>
+                          <button
+                            className="secondary"
+                            disabled={busy}
+                            onClick={() => {
+                              setFeedbackPreviewContent("");
+                              setEditorMode("iterate");
+                            }}
+                          >
+                            Iterate
+                          </button>
+                          <button className="primary" disabled={busy} onClick={onFinalizeSelected}>
+                            Finalize Selected
+                          </button>
+                        </div>
+                      ) : null}
 
                       {editorMode === "iterate" && (
                         <>
                           <h3 style={{ marginTop: "16px" }}>Feedback Editor</h3>
-                          <textarea value={feedbackText} onChange={(e) => setFeedbackText(e.target.value)} />
+                          <textarea
+                            ref={editorialFeedbackTextareaRef}
+                            className="editorial-edit-textarea"
+                            value={feedbackText}
+                            onChange={(e) => {
+                              setFeedbackText(e.target.value);
+                              autoResizeTextarea(e.target);
+                            }}
+                          />
                           <div className="row" style={{ marginTop: "8px" }}>
+                            <button className="secondary" disabled={busy || isPreviewing} onClick={onCancelEditorialEdit}>Cancel</button>
                             <button className="secondary" disabled={busy} onClick={onFeedbackPreview}>Preview</button>
                             {isPreviewing ? (
                               <div className="row" aria-live="polite">
@@ -2917,7 +3515,7 @@ export default function App() {
                           {feedbackPreviewContent ? (
                             <>
                               <h3 style={{ marginTop: "16px" }}>Preview Content</h3>
-                              <pre className="content">{feedbackPreviewContent}</pre>
+                              <pre className="content editorial-content-block">{feedbackPreviewContent}</pre>
                               <div className="row" style={{ marginTop: "8px" }}>
                                 <button className="secondary" disabled={busy} onClick={onSavePreview}>Save</button>
                                 <button className="primary" disabled={busy} onClick={onFinalizeFromPreview}>Finalize Content</button>
@@ -2930,6 +3528,7 @@ export default function App() {
                   )}
                 </div>
 
+                {editorMode === "none" ? (
                 <div>
                   <h3>Keywords</h3>
                   <div className="row">
@@ -2955,6 +3554,7 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+                ) : null}
               </div>
             </>
           )}
@@ -3028,13 +3628,17 @@ export default function App() {
                   {["text", "image", "gif", "video", "audio"].map((kind) => {
                     const formats = orderArtifactFormats(kind, artifactFormatsByKind[kind] || []);
                     if (!formats.length) return null;
+                    const kindUnavailable = kind === "gif" || kind === "video";
                     const selectedCount = formats.filter((fmt) => selectedArtifactFormats.includes(fmt)).length;
                     const allSelected = formats.length > 0 && selectedCount === formats.length;
-                    const showBulkToggle = formats.length > 3;
+                    const showBulkToggle = formats.length > 3 && !kindUnavailable;
                     return (
-                      <div key={`wizard-kind-${kind}`} style={{ marginBottom: "14px" }}>
-                        <div className="row" style={{ marginBottom: "6px" }}>
+                      <div key={`wizard-kind-${kind}`} style={{ marginBottom: "22px", opacity: kindUnavailable ? 0.45 : 1 }}>
+                        <div className="row" style={{ marginBottom: "10px" }}>
                           <strong style={{ textTransform: "capitalize" }}>{kind}</strong>
+                          {kindUnavailable ? (
+                            <span className="note" style={{ color: "#c0392b", fontStyle: "italic" }}>temporarily unavailable</span>
+                          ) : null}
                           {showBulkToggle ? (
                             <button
                               type="button"
@@ -3045,7 +3649,7 @@ export default function App() {
                               {allSelected ? "Unselect All" : "Select All"}
                             </button>
                           ) : null}
-                          <span className="note">{selectedCount}/{formats.length} selected</span>
+                          {!kindUnavailable ? <span className="note">{selectedCount}/{formats.length} selected</span> : null}
                         </div>
                         <div className="artifact-card-grid">
                           {formats.map((fmt) => {
@@ -3057,8 +3661,10 @@ export default function App() {
                                 key={card.key}
                                 type="button"
                                 className={`artifact-select-card ${exists ? "artifact-select-card-existing" : "artifact-select-card-missing"} ${isSelected ? "artifact-select-card-selected" : ""}`}
-                                onClick={() => toggleArtifactFormat(card.key)}
-                                disabled={busy}
+                                onClick={() => !kindUnavailable && toggleArtifactFormat(card.key)}
+                                disabled={busy || kindUnavailable}
+                                title={kindUnavailable ? "Video generation is temporarily unavailable" : undefined}
+                                style={kindUnavailable ? { cursor: "not-allowed" } : undefined}
                               >
                                 <div className="artifact-select-card-title">{card.title}</div>
                                 {card.description ? <div className="artifact-select-card-desc">{card.description}</div> : null}
@@ -3139,7 +3745,7 @@ export default function App() {
                     {artifactStyleSource === "voice_profile" ? (
                       <>
                         <div style={{ marginTop: "10px" }}>
-                          <label>voice_profile_id</label>
+                          <label>voice_profile_id<span className="publish-required-mark"> *</span></label>
                           <select
                             value={artifactStyleVoiceProfileId}
                             onChange={(e) => {
@@ -3192,7 +3798,7 @@ export default function App() {
                       </>
                     ) : (
                       <div style={{ marginTop: "10px" }}>
-                        <label>Voice Style</label>
+                        <label>Voice Style<span className="publish-required-mark"> *</span></label>
                         <textarea
                           value={artifactManualCoreVoice}
                           onChange={(e) => setArtifactManualCoreVoice(e.target.value)}
@@ -3316,7 +3922,7 @@ export default function App() {
                                 {card.key === "caption" ? (
                                   <>
                                     <div><label>length</label><select value={adv.length || "short"} onChange={(e) => updateArtifactAdvanced("caption", "length", e.target.value)}><option value="short">short</option><option value="medium">medium</option></select></div>
-                                    <div><label>emoji_density</label><select value={adv.emoji_density || "light"} onChange={(e) => updateArtifactAdvanced("caption", "emoji_density", e.target.value)}><option value="none">none</option><option value="light">light</option></select></div>
+                                    <div><label>emoji_density</label><select value={adv.emoji_density || "light"} onChange={(e) => updateArtifactAdvanced("caption", "emoji_density", e.target.value)}><option value="none">none</option><option value="light">light</option><option value="medium">medium</option><option value="high">high</option></select></div>
                                     <div><label>structure_hint</label><select value={adv.structure_hint || "plain"} onChange={(e) => updateArtifactAdvanced("caption", "structure_hint", e.target.value)}><option value="plain">plain</option><option value="bullet-ish">bullet-ish</option><option value="mini-story">mini-story</option></select></div>
                                   </>
                                 ) : null}
@@ -3390,27 +3996,18 @@ export default function App() {
                         <h4 className="artifact-style-subheading">Creative Direction</h4>
                         <div className="grid two">
                           <div>
-                            <label>Theme</label>
+                            <label>Theme<span className="publish-required-mark"> *</span></label>
                             <input
+                              className="suggestive-placeholder"
                               value={artifactImageStyle.theme || ""}
                               onChange={(e) => updateArtifactImageStyle("theme", e.target.value)}
                               placeholder='e.g. "luxury chocolate", "minimal fintech", "kids comic"'
                             />
                           </div>
                           <div style={{ gridColumn: "1 / -1" }}>
-                            <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-                              <label style={{ marginBottom: 0 }}>Subject / core prompt</label>
-                              <label className="tag" style={{ display: "inline-flex", alignItems: "center", marginBottom: 0 }}>
-                                <input
-                                  type="checkbox"
-                                  checked={!!artifactImageStyle.include_master_content}
-                                  onChange={(e) => updateArtifactImageStyle("include_master_content", !!e.target.checked)}
-                                  style={{ width: "auto", marginRight: "6px" }}
-                                />
-                                include master content for context
-                              </label>
-                            </div>
+                            <label>Subject / core prompt<span className="publish-required-mark"> *</span></label>
                             <textarea
+                              className="suggestive-placeholder"
                               value={artifactImageStyle.subject_prompt || ""}
                               onChange={(e) => updateArtifactImageStyle("subject_prompt", e.target.value)}
                               placeholder="What should be in the image (who/what + setting + action)."
@@ -3463,6 +4060,14 @@ export default function App() {
                             <label>Texture</label>
                             <select value={artifactImageStyle.texture || "clean"} onChange={(e) => updateArtifactImageStyle("texture", e.target.value)}>
                               {["clean", "film_grain", "halftone", "paper", "canvas", "noise"].map((v) => (
+                                <option key={v} value={v}>{v}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label>Lighting</label>
+                            <select value={artifactImageStyle.lighting || "soft_daylight"} onChange={(e) => updateArtifactImageStyle("lighting", e.target.value)}>
+                              {["soft_daylight", "golden_hour", "sunset_warm", "overcast_diffused", "studio_softbox", "high_key_bright", "low_key_moody", "neon_night", "backlit_silhouette", "rim_light", "volumetric_godrays", "dramatic_spotlight"].map((v) => (
                                 <option key={v} value={v}>{v}</option>
                               ))}
                             </select>
@@ -3561,27 +4166,18 @@ export default function App() {
                         <h4 className="artifact-style-subheading">Creative Direction</h4>
                         <div className="grid two">
                           <div>
-                            <label>Theme</label>
+                            <label>Theme<span className="publish-required-mark"> *</span></label>
                             <input
+                              className="suggestive-placeholder"
                               value={artifactVideoStyle.theme || ""}
                               onChange={(e) => updateArtifactVideoStyle("theme", e.target.value)}
                               placeholder='e.g. "futuristic product launch", "cozy cooking loop"'
                             />
                           </div>
                           <div style={{ gridColumn: "1 / -1" }}>
-                            <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-                              <label style={{ marginBottom: 0 }}>Subject / core prompt</label>
-                              <label className="tag" style={{ display: "inline-flex", alignItems: "center", marginBottom: 0 }}>
-                                <input
-                                  type="checkbox"
-                                  checked={!!artifactVideoStyle.include_master_content}
-                                  onChange={(e) => updateArtifactVideoStyle("include_master_content", !!e.target.checked)}
-                                  style={{ width: "auto", marginRight: "6px" }}
-                                />
-                                include master content for context
-                              </label>
-                            </div>
+                            <label>Subject / core prompt<span className="publish-required-mark"> *</span></label>
                             <textarea
+                              className="suggestive-placeholder"
                               value={artifactVideoStyle.subject_prompt || ""}
                               onChange={(e) => updateArtifactVideoStyle("subject_prompt", e.target.value)}
                               placeholder="What should be in the video (who/what + setting + action)."
@@ -3684,14 +4280,40 @@ export default function App() {
                       <div className="artifact-style-subsection">
                         <h4 className="artifact-style-subheading">Composition</h4>
                         <p className="note" style={{ marginTop: "4px" }}>
-                          Standard composition controls are applied automatically per format (GIF / Reel / Short video) and will be included in the generation prompt.
+                          Standard composition controls (pacing, motion intensity, safe zones) are applied automatically per format. Override below as needed.
                         </p>
+                        <div className="grid two" style={{ marginTop: "10px" }}>
+                          <div>
+                            <label>Camera motion</label>
+                            <select value={artifactVideoStyle.camera_motion || ""} onChange={(e) => updateArtifactVideoStyle("camera_motion", e.target.value)}>
+                              <option value="">Auto</option>
+                              {["slow_dolly_in", "orbital_drift", "tracking_follow", "static_locked", "handheld_documentary", "push_pull_oscillate"].map((v) => (
+                                <option key={v} value={v}>{v}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label>Energy level</label>
+                            <div className="row">
+                              {["low", "medium", "high"].map((level) => (
+                                <button
+                                  key={level}
+                                  type="button"
+                                  className={(artifactVideoStyle.energy_level || "medium") === level ? "primary" : "secondary"}
+                                  onClick={() => updateArtifactVideoStyle("energy_level", level)}
+                                >
+                                  {level.charAt(0).toUpperCase() + level.slice(1)}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   ) : null}
 
                   <div className="row" style={{ marginTop: "12px" }}>
-                    <button className="primary" disabled={busy || !selectedArtifactFormats.length} onClick={onGenerateArtifacts}>
+                    <button className="primary" disabled={busy || !canGenerateArtifactsNow} onClick={onGenerateArtifacts}>
                       {isArtifactGenerating ? "Generating Artifacts..." : "Generate Selected Artifacts"}
                     </button>
                   </div>
@@ -3738,6 +4360,7 @@ export default function App() {
                             <input
                               value={editingArtifactTitleValue}
                               onChange={(e) => setEditingArtifactTitleValue(e.target.value)}
+                              onBlur={() => saveArtifactTitle(artifact)}
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();
@@ -3751,37 +4374,371 @@ export default function App() {
                               style={{ minWidth: "220px", width: "auto" }}
                               autoFocus
                             />
-                            <button type="button" className="primary" disabled={isSavingArtifactTitle} onClick={() => saveArtifactTitle(artifact)}>
-                              {isSavingArtifactTitle ? "Saving..." : "Save"}
-                            </button>
-                            <button type="button" className="secondary" disabled={isSavingArtifactTitle} onClick={cancelEditingArtifactTitle}>
-                              Cancel
-                            </button>
                           </div>
                         ) : (
-                          <>
-                            <button
-                              type="button"
-                              className={idx === selectedStoredArtifactTab ? "primary" : "secondary"}
-                              onClick={() => setSelectedStoredArtifactTab(idx)}
-                            >
-                              {artifact.title || `${selectedStoredFormat} #${idx + 1}`}
-                            </button>
-                            <button
-                              type="button"
-                              className="secondary artifact-title-edit-btn"
-                              onClick={() => startEditingArtifactTitle(artifact)}
-                              aria-label={`Edit name for ${artifact.title || `${selectedStoredFormat} #${idx + 1}`}`}
-                            >
-                              Edit
-                            </button>
-                          </>
+                          <button
+                            type="button"
+                            className={idx === selectedStoredArtifactTab ? "primary" : "secondary"}
+                            onClick={() => {
+                              if (idx === selectedStoredArtifactTab) {
+                                startEditingArtifactTitle(artifact);
+                              } else {
+                                setSelectedStoredArtifactTab(idx);
+                              }
+                            }}
+                            aria-label={`Select or rename ${artifact.title || `${selectedStoredFormat} #${idx + 1}`}`}
+                          >
+                            {artifact.title || `${selectedStoredFormat} #${idx + 1}`}
+                          </button>
                         )}
                       </div>
                     ))}
                   </div>
                   {selectedStoredArtifact ? (
-                    renderStoredArtifactContent(selectedStoredArtifact)
+                    <>
+                      {artifactEditMode === "inline" ? (
+                        <div className="card" style={{ marginTop: "8px", marginBottom: "8px" }}>
+                          <LabelWithTooltip
+                            text="Edit Inline"
+                            tooltip="Directly edit text content. Save will update DB and overwrite the same Azure blob path when available."
+                          />
+                          <textarea
+                            ref={artifactInlineTextareaRef}
+                            className="artifact-edit-textarea"
+                            value={artifactInlineText}
+                            onChange={(e) => {
+                              setArtifactInlineText(e.target.value);
+                              autoResizeTextarea(e.target);
+                            }}
+                            placeholder="Edit artifact content..."
+                          />
+                          <div className="row" style={{ marginTop: "8px" }}>
+                            <button
+                              type="button"
+                              className="primary"
+                              disabled={busy || isArtifactEditing}
+                              onClick={onSaveInlineArtifactEdit}
+                            >
+                              {isArtifactEditing ? "Saving..." : "Save Inline Edit"}
+                            </button>
+                            <button type="button" className="secondary" disabled={busy || isArtifactEditing} onClick={resetArtifactEditPanel}>
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {artifactEditMode === "iterate" ? (
+                        <>
+                          <div className="card" style={{ marginTop: "8px", marginBottom: "8px" }}>
+                            <LabelWithTooltip
+                              text="Edit Instruction"
+                              tooltip="Describe exactly how to modify this artifact."
+                            />
+                            <textarea
+                              ref={artifactIterateInstructionTextareaRef}
+                              className="artifact-edit-textarea"
+                              value={artifactIterateInstruction}
+                              onChange={(e) => {
+                                setArtifactIterateInstruction(e.target.value);
+                                autoResizeTextarea(e.target);
+                              }}
+                              placeholder="Describe how to modify this artifact..."
+                            />
+                          </div>
+
+                          {String(selectedStoredArtifact?.kind || "").trim() === "text" ? (
+                            <>
+                              <div className="card" style={{ marginTop: "8px", marginBottom: "8px" }}>
+                                <h3 style={{ marginTop: 0 }}>Style Source</h3>
+                                <div className="row">
+                                  <label className="tag">
+                                    <input
+                                      type="radio"
+                                      name="artifact-iterate-style-source"
+                                      checked={artifactIterateStyleSource === "voice_profile"}
+                                      onChange={() => setArtifactIterateStyleSource("voice_profile")}
+                                      style={{ width: "auto", marginRight: "6px" }}
+                                    />
+                                    Use saved Voice Profile
+                                  </label>
+                                  <label className="tag">
+                                    <input
+                                      type="radio"
+                                      name="artifact-iterate-style-source"
+                                      checked={artifactIterateStyleSource === "manual"}
+                                      onChange={() => setArtifactIterateStyleSource("manual")}
+                                      style={{ width: "auto", marginRight: "6px" }}
+                                    />
+                                    Enter style manually
+                                  </label>
+                                </div>
+                                {artifactIterateStyleSource === "voice_profile" ? (
+                                  <div style={{ marginTop: "8px" }}>
+                                    <label>voice_profile_id</label>
+                                    <select value={artifactIterateVoiceProfileId} onChange={(e) => setArtifactIterateVoiceProfileId(e.target.value)}>
+                                      <option value="">Select voice profile</option>
+                                      {approvedActiveVoiceProfileOptions.map((opt) => (
+                                        <option key={`iter-vp-${opt.value}`} value={opt.value}>{opt.label}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                ) : (
+                                  <div style={{ marginTop: "8px" }}>
+                                    <label>Voice Style</label>
+                                    <textarea
+                                      ref={artifactIterateVoiceStyleTextareaRef}
+                                      className="artifact-edit-textarea"
+                                      value={artifactIterateManualCoreVoice}
+                                      onChange={(e) => {
+                                        setArtifactIterateManualCoreVoice(e.target.value);
+                                        autoResizeTextarea(e.target);
+                                      }}
+                                      placeholder="How should this revised artifact sound?"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="card" style={{ marginTop: "8px", marginBottom: "8px" }}>
+                                <h3 style={{ marginTop: 0 }}>Tone Nuances</h3>
+                                <div className="grid two">
+                                  {[
+                                    ["directness", "Directness", "soft", "direct"],
+                                    ["warmth", "Warmth", "neutral", "warm"],
+                                    ["energy", "Energy", "calm", "high-energy"],
+                                    ["authority", "Authority", "exploratory", "decisive"],
+                                  ].map(([key, label, left, right]) => (
+                                    <div key={`iter-tone-${key}`}>
+                                      <label>{label}</label>
+                                      <input
+                                        type="range"
+                                        min="0"
+                                        max="4"
+                                        step="1"
+                                        value={Number(artifactIterateToneNuance[key] ?? 2)}
+                                        onChange={(e) => updateArtifactIterateToneNuance(key, Number(e.target.value))}
+                                      />
+                                      <div className="row note" style={{ justifyContent: "space-between" }}>
+                                        <span>{left} ↔ {right}</span>
+                                        <span>{artifactIterateToneNuance[key] ?? 2}/4</span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                  {toneBaseFromProjectTone(form.tone_preference) === "analytical" ? (
+                                    <>
+                                      <div>
+                                        <label>Rigor</label>
+                                        <input type="range" min="0" max="4" step="1" value={Number(artifactIterateToneNuance.rigor ?? 3)} onChange={(e) => updateArtifactIterateToneNuance("rigor", Number(e.target.value))} />
+                                      </div>
+                                      <div>
+                                        <label>Abstraction</label>
+                                        <input type="range" min="0" max="4" step="1" value={Number(artifactIterateToneNuance.abstraction ?? 2)} onChange={(e) => updateArtifactIterateToneNuance("abstraction", Number(e.target.value))} />
+                                      </div>
+                                      <div>
+                                        <label>Framework mode</label>
+                                        <select value={artifactIterateFrameworkMode} onChange={(e) => setArtifactIterateFrameworkMode(e.target.value)}>
+                                          <option value="none">none</option>
+                                          <option value="light">light</option>
+                                          <option value="strong">strong</option>
+                                        </select>
+                                      </div>
+                                    </>
+                                  ) : null}
+                                </div>
+                              </div>
+
+                              {Object.prototype.hasOwnProperty.call(FORMAT_ADVANCED_DEFAULTS, String(selectedStoredArtifact?.format || "")) ? (
+                                <div className="card" style={{ marginTop: "8px", marginBottom: "8px" }}>
+                                  <h3 style={{ marginTop: 0 }}>Format-specific Advanced Settings (optional)</h3>
+                                  <div className="grid two">
+                                    {String(selectedStoredArtifact?.format || "") === "post" ? (
+                                      <>
+                                        <div><label>length</label><select value={artifactIterateFormatAdvanced?.post?.length || "medium"} onChange={(e) => updateArtifactIterateAdvanced("post", "length", e.target.value)}><option value="short">short</option><option value="medium">medium</option><option value="long">long</option></select></div>
+                                        <div><label>structure_hint</label><select value={artifactIterateFormatAdvanced?.post?.structure_hint || "framework-led"} onChange={(e) => updateArtifactIterateAdvanced("post", "structure_hint", e.target.value)}><option value="framework-led">framework-led</option><option value="story-led">story-led</option><option value="list-led">list-led</option></select></div>
+                                        <div><label>cta_strength</label><select value={artifactIterateFormatAdvanced?.post?.cta_strength || "medium"} onChange={(e) => updateArtifactIterateAdvanced("post", "cta_strength", e.target.value)}><option value="soft">soft</option><option value="medium">medium</option><option value="strong">strong</option></select></div>
+                                      </>
+                                    ) : null}
+                                    {String(selectedStoredArtifact?.format || "") === "caption" ? (
+                                      <>
+                                        <div><label>length</label><select value={artifactIterateFormatAdvanced?.caption?.length || "short"} onChange={(e) => updateArtifactIterateAdvanced("caption", "length", e.target.value)}><option value="short">short</option><option value="medium">medium</option></select></div>
+                                        <div><label>emoji_density</label><select value={artifactIterateFormatAdvanced?.caption?.emoji_density || "light"} onChange={(e) => updateArtifactIterateAdvanced("caption", "emoji_density", e.target.value)}><option value="none">none</option><option value="light">light</option><option value="moderate">moderate</option></select></div>
+                                      </>
+                                    ) : null}
+                                    {String(selectedStoredArtifact?.format || "") === "newsletter" ? (
+                                      <>
+                                        <div><label>sections</label><input type="number" min="3" max="6" value={artifactIterateFormatAdvanced?.newsletter?.sections || 4} onChange={(e) => updateArtifactIterateAdvanced("newsletter", "sections", Number(e.target.value))} /></div>
+                                        <div><label>takeaway_bullets</label><input type="number" min="3" max="6" value={artifactIterateFormatAdvanced?.newsletter?.takeaway_bullets || 4} onChange={(e) => updateArtifactIterateAdvanced("newsletter", "takeaway_bullets", Number(e.target.value))} /></div>
+                                      </>
+                                    ) : null}
+                                    {String(selectedStoredArtifact?.format || "") === "blog" ? (
+                                      <>
+                                        <div><label>seo_intent</label><select value={artifactIterateFormatAdvanced?.blog?.seo_intent || "informational"} onChange={(e) => updateArtifactIterateAdvanced("blog", "seo_intent", e.target.value)}><option value="informational">informational</option><option value="how-to">how-to</option><option value="comparison">comparison</option></select></div>
+                                        <div><label>faq_count</label><input type="number" min="0" max="5" value={artifactIterateFormatAdvanced?.blog?.faq_count || 3} onChange={(e) => updateArtifactIterateAdvanced("blog", "faq_count", Number(e.target.value))} /></div>
+                                      </>
+                                    ) : null}
+                                    {String(selectedStoredArtifact?.format || "") === "script_short" ? (
+                                      <>
+                                        <div><label>target_duration_sec</label><input type="number" min="10" max="120" value={artifactIterateFormatAdvanced?.script_short?.target_duration_sec || 30} onChange={(e) => updateArtifactIterateAdvanced("script_short", "target_duration_sec", Number(e.target.value))} /></div>
+                                        <div><label>pacing</label><select value={artifactIterateFormatAdvanced?.script_short?.pacing || "normal"} onChange={(e) => updateArtifactIterateAdvanced("script_short", "pacing", e.target.value)}><option value="slow">slow</option><option value="normal">normal</option><option value="fast">fast</option></select></div>
+                                      </>
+                                    ) : null}
+                                    {String(selectedStoredArtifact?.format || "") === "cta_variants" ? (
+                                      <>
+                                        <div><label>variant_count</label><input type="number" min="7" max="11" value={artifactIterateFormatAdvanced?.cta_variants?.variant_count || 7} onChange={(e) => updateArtifactIterateAdvanced("cta_variants", "variant_count", Number(e.target.value))} /></div>
+                                        <div><label>angles (comma-separated)</label><input value={Array.isArray(artifactIterateFormatAdvanced?.cta_variants?.angles) ? artifactIterateFormatAdvanced.cta_variants.angles.join(", ") : ""} onChange={(e) => updateArtifactIterateAdvanced("cta_variants", "angles", String(e.target.value || "").split(",").map((x) => x.trim()).filter(Boolean))} /></div>
+                                      </>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </>
+                          ) : null}
+
+                          {String(selectedStoredArtifact?.kind || "").trim() === "image" ? (
+                            <div className="card" style={{ marginTop: "8px", marginBottom: "8px" }}>
+                              <h3 style={{ marginTop: 0 }}>Image Style</h3>
+                              <div className="artifact-style-subsection">
+                                <h4 className="artifact-style-subheading">Visual Display</h4>
+                                <div className="grid two">
+                                  <div><label>Medium</label><select value={artifactIterateImageStyle.medium || "illustration"} onChange={(e) => updateArtifactIterateImageStyle("medium", e.target.value)}>{["photo", "illustration", "3d_render", "comic", "watercolor", "oil_paint", "vector_flat", "pixel_art"].map((v) => <option key={`iter-img-med-${v}`} value={v}>{v}</option>)}</select></div>
+                                  <div><label>Texture</label><select value={artifactIterateImageStyle.texture || "clean"} onChange={(e) => updateArtifactIterateImageStyle("texture", e.target.value)}>{["clean", "film_grain", "halftone", "paper", "canvas", "noise"].map((v) => <option key={`iter-img-tex-${v}`} value={v}>{v}</option>)}</select></div>
+                                  <div><label>Lighting</label><select value={artifactIterateImageStyle.lighting || "soft_daylight"} onChange={(e) => updateArtifactIterateImageStyle("lighting", e.target.value)}>{["soft_daylight", "golden_hour", "sunset_warm", "overcast_diffused", "studio_softbox", "high_key_bright", "low_key_moody", "neon_night", "backlit_silhouette", "rim_light", "volumetric_godrays", "dramatic_spotlight"].map((v) => <option key={`iter-img-light-${v}`} value={v}>{v}</option>)}</select></div>
+                                  <div><label>Palette mode</label><select value={artifactIterateImageStyle.palette_mode || "muted"} onChange={(e) => updateArtifactIterateImageStyle("palette_mode", e.target.value)}>{["brand", "monochrome", "pastel", "neon", "earthy", "muted", "high_contrast"].map((v) => <option key={`iter-img-pal-${v}`} value={v}>{v}</option>)}</select></div>
+                                  <div><label>Output fidelity</label><select value={artifactIterateImageStyle.output_fidelity || "standard"} onChange={(e) => updateArtifactIterateImageStyle("output_fidelity", e.target.value)}><option value="standard">standard</option><option value="hd">hd</option></select></div>
+                                  {(artifactIterateImageStyle.palette_mode || "") === "brand" ? (
+                                    <div style={{ gridColumn: "1 / -1" }}>
+                                      <label>Brand colors</label>
+                                      <div className="grid two">
+                                        {["primary", "secondary", "accent", "background"].map((slot) => (
+                                          <div key={`iter-img-color-${slot}`}>
+                                            <label style={{ marginBottom: "4px", fontWeight: 500 }}>{slot}</label>
+                                            <div className="row">
+                                              <input type="color" value={artifactIterateImageStyle?.brand_colors?.[slot] || "#000000"} onChange={(e) => updateArtifactIterateImageBrandColor(slot, e.target.value)} style={{ width: "48px", padding: "2px", height: "38px" }} />
+                                              <input value={artifactIterateImageStyle?.brand_colors?.[slot] || ""} onChange={(e) => updateArtifactIterateImageBrandColor(slot, e.target.value)} placeholder="#000000" />
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </div>
+                              <div className="artifact-style-subsection">
+                                <h4 className="artifact-style-subheading">Composition</h4>
+                                <div className="grid two">
+                                  <div><label>Mood</label><select value={artifactIterateImageStyle.mood || "premium"} onChange={(e) => updateArtifactIterateImageStyle("mood", e.target.value)}>{["playful", "serious", "premium", "cozy", "dramatic", "energetic"].map((v) => <option key={`iter-img-mood-${v}`} value={v}>{v}</option>)}</select></div>
+                                  <div><label>Focus / negative space</label><select value={artifactIterateImageStyle.focus_negative_space || "subject_centered"} onChange={(e) => updateArtifactIterateImageStyle("focus_negative_space", e.target.value)}>{["subject_centered", "rule_of_thirds", "negative_space_left", "negative_space_right"].map((v) => <option key={`iter-img-focus-${v}`} value={v}>{v}</option>)}</select></div>
+                                </div>
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {(String(selectedStoredArtifact?.kind || "").trim() === "video" || String(selectedStoredArtifact?.kind || "").trim() === "gif") ? (
+                            <div className="card" style={{ marginTop: "8px", marginBottom: "8px" }}>
+                              <h3 style={{ marginTop: 0 }}>Video Style</h3>
+                              <div className="artifact-style-subsection">
+                                <h4 className="artifact-style-subheading">Visual Display</h4>
+                                <div className="grid two">
+                                  <div><label>Mood</label><select value={artifactIterateVideoStyle.mood || "energetic"} onChange={(e) => updateArtifactIterateVideoStyle("mood", e.target.value)}>{["playful", "serious", "premium", "cozy", "dramatic", "energetic", "inspiring", "suspenseful", "mysterious", "whimsical", "futuristic", "nostalgic"].map((v) => <option key={`iter-v-mood-${v}`} value={v}>{v}</option>)}</select></div>
+                                  <div><label>Lighting</label><select value={artifactIterateVideoStyle.lighting || "soft_daylight"} onChange={(e) => updateArtifactIterateVideoStyle("lighting", e.target.value)}>{["soft_daylight", "golden_hour", "sunset_warm", "overcast_diffused", "studio_softbox", "high_key_bright", "low_key_moody", "neon_night", "backlit_silhouette", "rim_light", "volumetric_godrays", "dramatic_spotlight"].map((v) => <option key={`iter-v-light-${v}`} value={v}>{v}</option>)}</select></div>
+                                  <div><label>Palette mode</label><select value={artifactIterateVideoStyle.palette_mode || "muted"} onChange={(e) => updateArtifactIterateVideoStyle("palette_mode", e.target.value)}>{["brand", "monochrome", "pastel", "neon", "earthy", "muted", "high_contrast"].map((v) => <option key={`iter-v-pal-${v}`} value={v}>{v}</option>)}</select></div>
+                                  <div><label>Output fidelity</label><select value={artifactIterateVideoStyle.output_fidelity || "standard"} onChange={(e) => updateArtifactIterateVideoStyle("output_fidelity", e.target.value)}><option value="standard">standard</option><option value="pro">pro</option></select></div>
+                                  {(artifactIterateVideoStyle.palette_mode || "") === "brand" ? (
+                                    <div style={{ gridColumn: "1 / -1" }}>
+                                      <label>Brand colors</label>
+                                      <div className="grid two">
+                                        {["primary", "secondary", "accent", "background"].map((slot) => (
+                                          <div key={`iter-v-color-${slot}`}>
+                                            <label style={{ marginBottom: "4px", fontWeight: 500 }}>{slot}</label>
+                                            <div className="row">
+                                              <input type="color" value={artifactIterateVideoStyle?.brand_colors?.[slot] || "#000000"} onChange={(e) => updateArtifactIterateVideoBrandColor(slot, e.target.value)} style={{ width: "48px", padding: "2px", height: "38px" }} />
+                                              <input value={artifactIterateVideoStyle?.brand_colors?.[slot] || ""} onChange={(e) => updateArtifactIterateVideoBrandColor(slot, e.target.value)} placeholder="#000000" />
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </div>
+                              <div className="artifact-style-subsection">
+                                <h4 className="artifact-style-subheading">Composition</h4>
+                                <p className="note" style={{ marginTop: "4px" }}>
+                                  Standard composition controls (pacing, motion intensity, safe zones) are applied automatically per format. Override below as needed.
+                                </p>
+                                <div className="grid two" style={{ marginTop: "10px" }}>
+                                  <div>
+                                    <label>Camera motion</label>
+                                    <select value={artifactIterateVideoStyle.camera_motion || ""} onChange={(e) => updateArtifactIterateVideoStyle("camera_motion", e.target.value)}>
+                                      <option value="">Auto</option>
+                                      {["slow_dolly_in", "orbital_drift", "tracking_follow", "static_locked", "handheld_documentary", "push_pull_oscillate"].map((v) => (
+                                        <option key={`iter-v-cam-${v}`} value={v}>{v}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label>Energy level</label>
+                                    <div className="row">
+                                      {["low", "medium", "high"].map((level) => (
+                                        <button
+                                          key={`iter-v-energy-${level}`}
+                                          type="button"
+                                          className={(artifactIterateVideoStyle.energy_level || "medium") === level ? "primary" : "secondary"}
+                                          onClick={() => updateArtifactIterateVideoStyle("energy_level", level)}
+                                        >
+                                          {level.charAt(0).toUpperCase() + level.slice(1)}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ) : null}
+
+                          <div className="row" style={{ marginTop: "8px" }}>
+                            <button
+                              type="button"
+                              className="primary"
+                              disabled={busy || isArtifactEditing}
+                              onClick={onIterateArtifactEdit}
+                            >
+                              {isArtifactEditing ? "Iterating..." : "Iterate Artifact"}
+                            </button>
+                            <button type="button" className="secondary" disabled={busy || isArtifactEditing} onClick={resetArtifactEditPanel}>
+                              Cancel
+                            </button>
+                          </div>
+                        </>
+                      ) : null}
+
+                      {!isArtifactEditActive ? (
+                        <>
+                          {renderStoredArtifactContent(selectedStoredArtifact)}
+                          <div className="row" style={{ marginTop: "8px" }}>
+                            {String(selectedStoredArtifact?.kind || "").trim() === "text" ? (
+                              <button
+                                type="button"
+                                className={artifactEditMode === "inline" ? "primary" : "secondary"}
+                                disabled={busy || isArtifactEditing}
+                                onClick={() => startInlineArtifactEdit(selectedStoredArtifact)}
+                              >
+                                Edit Inline
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              className={artifactEditMode === "iterate" ? "primary" : "secondary"}
+                              disabled={busy || isArtifactEditing}
+                              onClick={() => startIterateArtifactEdit(selectedStoredArtifact)}
+                            >
+                              Iterate
+                            </button>
+                          </div>
+                        </>
+                      ) : null}
+                    </>
                   ) : null}
                 </>
               ) : (
@@ -3795,40 +4752,21 @@ export default function App() {
       {isAuthenticated && page === "publish" && (
         <div className="card">
           <h2>Publish</h2>
-          <div className="grid two">
-            <div>
-              <label>Select Platform</label>
-              <select
-                value={publishSelectedPlatform}
-                onChange={(e) => setPublishSelectedPlatform(e.target.value)}
-                disabled={busy || isPublishPlatformsLoading || !publishPlatforms.length}
-              >
-                <option value="">{isPublishPlatformsLoading ? "Loading platforms..." : "Select platform"}</option>
-                {publishPlatforms.map((p) => (
-                  <option key={p} value={p}>{p}</option>
-                ))}
-              </select>
-              <p className="note" style={{ marginTop: "6px" }}>
-                Platforms are loaded dynamically from adapter files under <code>backend/src/platforms/adapters</code>.
-              </p>
-            </div>
-            <div>
-              <label>Project Artifacts</label>
-              <div className="row">
-                <button
-                  className="secondary"
-                  type="button"
-                  disabled={busy || isPublishArtifactsLoading || !(form.project_id || "").trim()}
-                  onClick={() => loadPublishArtifacts(form.project_id)}
-                >
-                  {isPublishArtifactsLoading ? "Loading..." : "Refresh Artifacts"}
-                </button>
-                <span className="note">{Array.isArray(publishArtifacts) ? publishArtifacts.length : 0} loaded</span>
-              </div>
-              <p className="note" style={{ marginTop: "6px" }}>
-                Map artifact parts (<code>body</code>, <code>tags_json</code>, <code>items</code>, <code>assets</code>) to platform fields.
-              </p>
-            </div>
+          <div>
+            <label>Select Platform</label>
+            <select
+              value={publishSelectedPlatform}
+              onChange={(e) => setPublishSelectedPlatform(e.target.value)}
+              disabled={busy || isPublishPlatformsLoading || !publishPlatforms.length}
+            >
+              <option value="">{isPublishPlatformsLoading ? "Loading platforms..." : "Select platform"}</option>
+              {publishPlatforms.map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+            {isPublishArtifactsLoading ? (
+              <p className="note" style={{ marginTop: "6px" }}>Loading artifacts...</p>
+            ) : null}
           </div>
 
           {!publishSelectedPlatform ? (
@@ -3908,11 +4846,6 @@ export default function App() {
                                     </option>
                                   ))}
                                 </select>
-                                {row.artifact_id ? (
-                                  <p className="note publish-primary-hint">
-                                    maps: <code>{primaryPart || "auto"}</code>{!canIncludeTags ? " | no tags" : ""}
-                                  </p>
-                                ) : null}
                               </div>
                               <div className="publish-source-options">
                                 <label className="tag" style={{ display: "inline-flex", alignItems: "center", marginBottom: 0 }}>
@@ -3946,77 +4879,113 @@ export default function App() {
               </div>
 
               <div className="row" style={{ marginTop: "14px" }}>
-                <button className="primary" type="button" disabled>
-                  Publish (Coming Soon)
-                </button>
                 <button
                   className="secondary"
                   type="button"
-                  disabled={busy || !(form.project_id || "").trim() || !publishSelectedPlatform}
-                  onClick={openSaveToPublishModal}
+                  disabled={
+                    busy
+                    || !(form.project_id || "").trim()
+                    || !publishSelectedPlatform
+                    || !areRequiredPublishFieldsMapped
+                  }
+                  onClick={openSaveToPublishDialog}
                 >
                   Save to Publish
                 </button>
-                <span className="note">
-                  UI mapping is ready; adapter publish API steps are pending implementation.
-                </span>
+                <button className="primary" type="button" disabled>
+                  Publish (Coming Soon)
+                </button>
               </div>
+              {!areRequiredPublishFieldsMapped ? (
+                <p className="note" style={{ marginTop: "6px" }}>Map all required fields before saving.</p>
+              ) : null}
               {publishSaveMessage ? <p className="note" style={{ marginTop: "8px" }}>{publishSaveMessage}</p> : null}
             </>
           ) : null}
         </div>
       )}
 
-      {isAuthenticated && showSavePublishModal ? (
-        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Save to Publish">
-          <div className="modal-card">
-            <h3>Save to Publish</h3>
+      {isAuthenticated && page === "publish" && showPublishSaveDialog ? (
+        <div className="modal-overlay" onClick={closeSaveToPublishDialog}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Save To Publish</h3>
             <div className="grid two">
               <div>
                 <label>Name</label>
                 <input
-                  type="text"
-                  value={savePublishName}
-                  onChange={(e) => setSavePublishName(e.target.value)}
-                  placeholder="e.g. LinkedinPost_1"
-                  autoFocus
+                  value={publishSaveUserName}
+                  onChange={(e) => setPublishSaveUserName(e.target.value)}
+                  placeholder="Enter bundle name"
                 />
               </div>
               <div>
-                <label>Output Location (path or URL)</label>
-                <input
-                  type="text"
-                  value={savePublishLocation}
-                  onChange={(e) => setSavePublishLocation(e.target.value)}
-                  placeholder="C:\\Users\\...\\Posts  or  azure://container/prefix  or  gs://bucket/prefix"
-                />
+                <label>Destination Type</label>
+                <select
+                  value={publishSaveDestinationMode}
+                  onChange={(e) => {
+                    const nextMode = String(e.target.value || "url");
+                    setPublishSaveDestinationMode(nextMode);
+                    window.localStorage.setItem("cpublishr_publish_destination_mode", nextMode);
+                  }}
+                >
+                  <option value="url">Enter explicit URL/path</option>
+                  <option value="local">Browse local folder</option>
+                </select>
               </div>
             </div>
 
-            <div className="row" style={{ marginTop: "10px" }}>
-              <button
-                type="button"
-                className="secondary"
-                disabled={busy || isPickingOutputPath}
-                onClick={onPickLocalOutputPath}
-              >
-                {isPickingOutputPath ? "Opening..." : "Browse Local"}
-              </button>
-            </div>
+            {publishSaveDestinationMode === "url" ? (
+              <div style={{ marginTop: "10px" }}>
+                <label>Output URL / Path</label>
+                <input
+                  value={publishSaveOutputPath}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setPublishSaveOutputPath(next);
+                    window.localStorage.setItem("cpublishr_publish_output_path", next);
+                  }}
+                  placeholder="azure://container/base-prefix OR gs://bucket/prefix OR C:\\output\\folder"
+                />
+              </div>
+            ) : (
+              <div style={{ marginTop: "10px" }}>
+                <label>Selected Local Folder</label>
+                <input
+                  value={publishSaveOutputPath}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setPublishSaveOutputPath(next);
+                    window.localStorage.setItem("cpublishr_publish_output_path", next);
+                  }}
+                  placeholder="C:\\output\\folder"
+                />
+                <div className="row" style={{ marginTop: "8px" }}>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={busy || isPublishPickingLocalPath}
+                    onClick={pickPublishOutputFolder}
+                  >
+                    {isPublishPickingLocalPath ? "Opening..." : "Browse"}
+                  </button>
+                </div>
+              </div>
+            )}
 
-            <div className="row" style={{ marginTop: "12px", justifyContent: "flex-end" }}>
-              <button type="button" className="secondary" disabled={busy} onClick={closeSaveToPublishModal}>
+            <div className="row" style={{ marginTop: "14px", justifyContent: "flex-end" }}>
+              <button type="button" className="secondary" onClick={closeSaveToPublishDialog} disabled={busy}>
                 Cancel
               </button>
-              <button type="button" className="primary" disabled={busy} onClick={onConfirmSaveToPublish}>
-                Save
+              <button type="button" className="primary" onClick={onSaveToPublish} disabled={busy}>
+                {busy ? "Saving..." : "Save"}
               </button>
             </div>
           </div>
         </div>
       ) : null}
 
-    </div>
+      </div>
+    </>
   );
 }
 

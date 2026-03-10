@@ -5,7 +5,6 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Callable
 
 import httpx
@@ -13,13 +12,13 @@ import httpx
 from src.core.config import settings
 from src.services.orchestration.artifact_schema import default_payload_template
 from src.services.orchestration.artifacts.contracts import ArtifactDraft, PipelineContext
-from src.services.storage.artifact_blob_storage import upload_bytes
+from src.services.orchestration.artifacts.persistence import save_image_bytes_to_local, upload_artifact_bytes
+from src.services.storage.artifact_blob_storage import blob_path_from_uri, download_bytes
 
 logger = logging.getLogger(__name__)
 
-IMAGES_DIR = Path(__file__).resolve().parent / "images"
-
 DALLE_PROMPT_MAX_CHARS = 4000
+FUTURE_IMAGE_EDIT_TOOL_NAMES = {"openai_edits", "stability_img2img"}
 
 
 # =============================================================================
@@ -90,20 +89,6 @@ def _call_azure_dalle(
         return None, str(e)
 
 
-def _save_image_to_disk(b64_data: str, ext: str, project_id: str = "", topic_title: str = "") -> Path | None:
-    """Save base64 image to backend/.../artifacts/formats/images/. Returns path or None."""
-    try:
-        IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-        slug = re.sub(r"[^\w\-]", "_", (topic_title or project_id or "image")[:60]).strip("_") or "image"
-        filename = f"{slug}_{int(time.time() * 1000)}.{ext}"
-        path = IMAGES_DIR / filename
-        path.write_bytes(base64.b64decode(b64_data))
-        return path
-    except Exception as e:
-        logger.warning("Failed to save image to disk: %s", e)
-        return None
-
-
 def connect_openai_images(*, prompt: str, output_formats: list[str], options: dict[str, Any]) -> dict[str, Any]:
     """
     Connector for Azure OpenAI DALL-E image generation.
@@ -135,15 +120,21 @@ def connect_openai_images(*, prompt: str, output_formats: list[str], options: di
             user_id = str(options.get("user_id") or "")
             topic_title = str(options.get("topic_title") or "")
 
-            saved_path = _save_image_to_disk(b64, file_ext, project_id, topic_title)
+            saved_path = save_image_bytes_to_local(
+                data=image_bytes,
+                ext=file_ext,
+                project_id=project_id,
+                topic_title=topic_title,
+            )
             local_filename = saved_path.name if saved_path else f"image_{int(time.time() * 1000)}.{file_ext}"
-            artifact_key = saved_path.stem if saved_path else f"img_{int(time.time() * 1000)}"
+            orchestrated_artifact_id = str(options.get("artifact_id") or "").strip()
+            artifact_key = orchestrated_artifact_id or (saved_path.stem if saved_path else f"img_{int(time.time() * 1000)}")
 
-            blob_ref = upload_bytes(
+            blob_ref = upload_artifact_bytes(
                 data=image_bytes,
                 user_id=user_id or "user",
                 project_id=project_id or "project",
-                format=str(options.get("artifact_format") or "image"),
+                fmt=str(options.get("artifact_format") or "image"),
                 artifact_id=artifact_key,
                 filename=local_filename,
                 content_type=mime,
@@ -216,8 +207,10 @@ FORMAT_RECIPES: dict[str, FormatRecipe] = {
         size="1024x1024",
         style="vivid",
         prompt_hint=(
-            "square social post; balanced composition with clean negative space for optional caption; "
-            "subject clear and uncluttered"
+            "square social post; subject center-framed or rule-of-thirds with strong visual tension "
+            "as a feed thumb-stopper (emotion, contrast, or implied motion); "
+            "clean negative space in bottom ~15% for caption safe zone; "
+            "no foreground clutter; avoid flat symmetrical layouts"
         ),
         export_format="png",
         resize_mode="cover",
@@ -228,8 +221,11 @@ FORMAT_RECIPES: dict[str, FormatRecipe] = {
         size="1792x1024",
         style="vivid",
         prompt_hint=(
-            "thumbnail; strong subject clarity, close framing, high separation from background; "
-            "reserve clear negative space for headline overlay; avoid tiny details/busy backgrounds"
+            "thumbnail; one hero subject occupying 60-70% of frame height; "
+            "if face present, eyes in upper third of frame; "
+            "strong warm-cool contrast between foreground subject and background; "
+            "high separation from background; reserve clear negative space right or bottom for headline overlay; "
+            "avoid tiny details and busy backgrounds"
         ),
         export_format="jpeg",
         resize_mode="crop",
@@ -240,8 +236,9 @@ FORMAT_RECIPES: dict[str, FormatRecipe] = {
         size="1024x1792",
         style="natural",
         prompt_hint=(
-            "cover; portrait composition with calm premium framing; preserve safe areas; "
-            "background minimal, avoid clutter near edges"
+            "cover; portrait composition; subject centered or upper-centered within 80% safe zone "
+            "(10% margin from all edges); subtle tonal darkening or gradient toward lower 20% "
+            "for title text overlay; calm premium look; background must not compete near edges"
         ),
         export_format="webp",
         resize_mode="cover",
@@ -252,8 +249,9 @@ FORMAT_RECIPES: dict[str, FormatRecipe] = {
         size="1792x1024",
         style="natural",
         prompt_hint=(
-            "banner; wide layout emphasizing clean negative space (preferably right) for optional text/logo; "
-            "background plain and simple"
+            "banner; horizontal 16:9 wide layout; subject anchored in left third of frame "
+            "with shallow depth-of-field; expansive background middle-to-right occupying at least "
+            "half the frame width, kept plain for text/logo overlay; panoramic feel — no tight crop"
         ),
         export_format="png",
         resize_mode="contain",
@@ -261,6 +259,75 @@ FORMAT_RECIPES: dict[str, FormatRecipe] = {
         denoise="light",
     ),
 }
+
+
+# =============================================================================
+# Enum label expansions (raw dropdown value → descriptive phrase for prompt)
+# Unknown/custom values pass through unchanged.
+# =============================================================================
+
+_IMAGE_ENUM_EXPANSIONS: dict[str, dict[str, str]] = {
+    "medium": {
+        "photo": "photorealistic photography",
+        "illustration": "digital illustration",
+        "3d_render": "3D CGI render",
+        "comic": "comic book art style",
+        "watercolor": "watercolor painting",
+        "oil_paint": "oil painting with visible brushwork",
+        "vector_flat": "flat vector graphic style",
+        "pixel_art": "pixel art retro style",
+    },
+    "texture": {
+        "clean": "clean smooth finish, no texture overlay",
+        "film_grain": "subtle film grain noise",
+        "halftone": "halftone dot pattern",
+        "paper": "natural paper texture",
+        "canvas": "canvas fabric texture",
+        "noise": "digital noise grain",
+    },
+    "palette_mode": {
+        "brand": "brand color palette (see brand colors below)",
+        "monochrome": "monochromatic single-tone palette",
+        "pastel": "soft pastel tones, low saturation",
+        "neon": "vivid neon colors, high saturation",
+        "earthy": "earthy organic tones, warm browns and greens",
+        "muted": "muted desaturated tones, soft contrast",
+        "high_contrast": "high contrast colors, strong separation",
+    },
+    "lighting": {
+        "soft_daylight": "soft natural daylight",
+        "golden_hour": "warm golden hour lighting",
+        "sunset_warm": "warm sunset glow",
+        "overcast_diffused": "overcast diffused ambient light",
+        "studio_softbox": "studio softbox lighting",
+        "high_key_bright": "high-key bright even lighting",
+        "low_key_moody": "low-key moody shadows",
+        "neon_night": "neon-lit nighttime atmosphere",
+        "backlit_silhouette": "backlit subject creating silhouette effect",
+        "rim_light": "rim/edge lighting separating subject from background",
+        "volumetric_godrays": "volumetric god rays filtering through atmosphere",
+        "dramatic_spotlight": "dramatic hard spotlight",
+    },
+    "mood": {
+        "playful": "playful, light, and fun",
+        "serious": "serious and authoritative",
+        "premium": "premium, sophisticated, luxury feel",
+        "cozy": "warm, cozy, and inviting",
+        "dramatic": "dramatic, high-contrast, intense",
+        "energetic": "energetic and dynamic",
+    },
+    "composition": {
+        "subject_centered": "subject centered with even surrounding space",
+        "rule_of_thirds": "rule-of-thirds framing",
+        "negative_space_left": "generous negative space on the left side",
+        "negative_space_right": "generous negative space on the right side",
+    },
+}
+
+
+def _expand_image_enum(field: str, value: str) -> str:
+    """Return the expanded descriptive phrase for a known enum value, or the raw value if unknown."""
+    return _IMAGE_ENUM_EXPANSIONS.get(field, {}).get(value, value)
 
 
 # =============================================================================
@@ -407,24 +474,34 @@ class ImageGenerationBuilder:
             max_len=1400,
         )
 
-        medium = _safe(user_style.get("medium") or user_style.get("visual_medium"), max_len=80)
-        texture = _safe(user_style.get("texture"), max_len=80)
+        medium_raw = _safe(user_style.get("medium") or user_style.get("visual_medium"), max_len=80)
+        medium = _expand_image_enum("medium", medium_raw) if medium_raw else ""
 
-        palette_mode = _safe(
+        texture_raw = _safe(user_style.get("texture"), max_len=80)
+        texture = _expand_image_enum("texture", texture_raw) if texture_raw else ""
+
+        lighting_raw = _safe(user_style.get("lighting"), max_len=80)
+        lighting = _expand_image_enum("lighting", lighting_raw) if lighting_raw else ""
+
+        palette_mode_raw = _safe(
             user_style.get("palette_mode")
             or user_style.get("color_palette")
             or user_style.get("color_pallete"),
             max_len=40,
         )
+        palette_mode = _expand_image_enum("palette_mode", palette_mode_raw) if palette_mode_raw else ""
         brand_colors = user_style.get("brand_colors") if isinstance(user_style.get("brand_colors"), dict) else {}
 
-        mood = _safe(user_style.get("mood"), max_len=60)
-        composition = _safe(
+        mood_raw = _safe(user_style.get("mood"), max_len=60)
+        mood = _expand_image_enum("mood", mood_raw) if mood_raw else ""
+
+        composition_raw = _safe(
             user_style.get("composition")
             or user_style.get("focus")
             or user_style.get("focus_negative_space"),
             max_len=80,
         )
+        composition = _expand_image_enum("composition", composition_raw) if composition_raw else ""
         include_master_content = _as_bool(user_style.get("include_master_content"), default=True)
 
         if not subject_prompt:
@@ -470,21 +547,41 @@ class ImageGenerationBuilder:
         if composition:
             primary.append(f"COMPOSITION: {composition}.")
 
-        if fmt == "thumbnail":
-            primary.append("Thumbnail rule: one hero subject, large and readable; strong separation from background; avoid small details.")
+        if fmt == "post_image":
+            primary.append(
+                "Feed rule: subject must have a strong visual anchor (emotion, contrast, or implied motion) "
+                "to stop scroll; avoid flat symmetrical layouts; bottom 15% of frame reserved for caption safe zone."
+            )
+        elif fmt == "thumbnail":
+            primary.append(
+                "Thumbnail rule: one hero subject occupying 60-70% of frame height; eyes/face (if present) "
+                "in upper third; strong warm-cool contrast between foreground subject and background; "
+                "avoid small details and busy backgrounds; clear negative space right or bottom for headline overlay."
+            )
         elif fmt == "cover":
-            primary.append("Cover rule: keep key subject details within a central safe area (leave ~10% margin from edges).")
+            primary.append(
+                "Cover rule: keep key subject details within an 80% central safe zone (10% margin from all edges); "
+                "subtle tonal darkening or gradient toward the lower 20% for title text overlay; "
+                "subject upper-centered or centered; background must not compete near edges."
+            )
         elif fmt == "banner":
-            primary.append("Banner rule: reserve clean negative space on the right for optional text/logo; if conflict, prioritize this over other composition preferences.")
+            primary.append(
+                "Banner rule: subject anchored in left third of frame with shallow depth-of-field blur; "
+                "right two-thirds kept plain and clean for text/logo overlay; "
+                "if conflict, right-side negative space takes priority over all composition preferences; "
+                "panoramic expansive feel — no tight crop."
+            )
 
         style_lines: list[str] = []
         if medium:
             style_lines.append(f"Medium: {medium}.")
         if texture:
             style_lines.append(f"Texture: {texture}.")
+        if lighting:
+            style_lines.append(f"Lighting: {lighting}.")
         if palette_mode:
             style_lines.append(f"Palette mode: {palette_mode}.")
-            if palette_mode == "brand" and brand_colors:
+            if palette_mode_raw == "brand" and brand_colors:
                 color_parts = [f"{k}={v}" for k, v in brand_colors.items() if str(v).strip()]
                 if color_parts:
                     style_lines.append(f"Brand colors: {', '.join(color_parts)}.")
@@ -515,12 +612,54 @@ class ImageGenerationBuilder:
     @staticmethod
     def _resolve_connector(style_settings: dict[str, Any]) -> tuple[str, Callable[..., dict[str, Any]]]:
         tool_map = available_image_tools()
-        tool_name = str(style_settings.get("tool_name") or "openai").strip().lower() or "openai"
+        requested_tool = str(style_settings.get("tool_name") or "openai").strip().lower() or "openai"
+        tool_name = "openai" if requested_tool in FUTURE_IMAGE_EDIT_TOOL_NAMES else requested_tool
         connector = tool_map.get(tool_name)
         if connector is None:
             valid = ", ".join(sorted(tool_map.keys()))
-            raise ValueError(f"Unsupported image tool '{tool_name}'. Supported tools: {valid}")
+            raise ValueError(f"Unsupported image tool '{requested_tool}'. Supported tools: {valid}")
         return tool_name, connector
+
+    @staticmethod
+    def _extract_source_image_assets(source_payload: dict[str, Any]) -> list[dict[str, Any]]:
+        assets = source_payload.get("assets") if isinstance(source_payload.get("assets"), list) else []
+        out: list[dict[str, Any]] = []
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            mime = str(asset.get("mime_type") or "").strip().lower()
+            fmt = str(asset.get("format") or "").strip().lower()
+            if mime.startswith("image/") or fmt in {"png", "jpg", "jpeg", "webp"}:
+                out.append(asset)
+        return out
+
+    @staticmethod
+    def _resolve_source_blob_paths(
+        source_blob_paths: list[str] | None,
+        source_image_assets: list[dict[str, Any]],
+    ) -> list[str]:
+        preferred = [str(p or "").strip() for p in (source_blob_paths or []) if str(p or "").strip()]
+        if preferred:
+            return preferred
+        from_assets: list[str] = []
+        seen: set[str] = set()
+        for asset in source_image_assets:
+            blob_path = str(asset.get("blob_path") or "").strip()
+            if not blob_path:
+                uri = str(asset.get("uri") or "").strip()
+                blob_path = str(blob_path_from_uri(uri) or "").strip()
+            if blob_path and blob_path not in seen:
+                seen.add(blob_path)
+                from_assets.append(blob_path)
+        return from_assets
+
+    @staticmethod
+    def _load_source_image_bytes(blob_paths: list[str]) -> tuple[bytes | None, str | None]:
+        for blob_path in blob_paths:
+            data = download_bytes(blob_path=blob_path)
+            if data:
+                return data, blob_path
+        return None, None
 
     # ---- Normalized settings snapshot ----
 
@@ -623,7 +762,141 @@ class ImageGenerationBuilder:
         payload["notes"] = "Image generation produced via selected connector with strict per-format controls."
 
         tags = [x for x in (ctx.seed_keywords or []) if isinstance(x, str) and x.strip()]
-        title = f"{getattr(ctx, 'topic_title', '')} - {fmt.replace('_', ' ').title()}".strip(" -")
+        custom_title = ""
+        if isinstance(getattr(ctx, "style_settings", None), dict):
+            custom_title = str(ctx.style_settings.get("default_artifact_title") or "").strip()
+        if custom_title and len(getattr(ctx, "requested_formats", []) or []) > 1:
+            title = f"{custom_title} - {fmt.replace('_', ' ').title()}"
+        else:
+            title = custom_title or f"{getattr(ctx, 'topic_title', '')} - {fmt.replace('_', ' ').title()}".strip(" -")
+        draft_status = str(tool_response.get("status") or "generated").strip().lower() or "generated"
+        return ArtifactDraft(format=fmt, title=title, payload_json=payload, tags_json=tags, status=draft_status)
+
+    def edit(
+        self,
+        *,
+        fmt: str,
+        ctx: PipelineContext,
+        source_artifact: dict[str, Any],
+        edit_instruction: str,
+        target_artifact_id: str | None = None,
+        source_blob_paths: list[str] | None = None,
+    ) -> ArtifactDraft:
+        if fmt not in self.formats:
+            raise ValueError(f"Unsupported image format for image builder edit: {fmt}")
+
+        source_payload = source_artifact.get("payload_json") if isinstance(source_artifact, dict) else {}
+        source_payload = source_payload if isinstance(source_payload, dict) else {}
+        source_settings = source_payload.get("settings") if isinstance(source_payload.get("settings"), dict) else {}
+        source_prompts = source_payload.get("prompts") if isinstance(source_payload.get("prompts"), list) else []
+        source_image_assets = self._extract_source_image_assets(source_payload)
+        resolved_source_blob_paths = self._resolve_source_blob_paths(source_blob_paths, source_image_assets)
+        source_image_bytes, source_image_blob_path = self._load_source_image_bytes(resolved_source_blob_paths)
+        source_image_asset = source_image_assets[0] if source_image_assets else {}
+
+        original_prompt = ""
+        for item in source_prompts:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text") or "").strip()
+            if text:
+                original_prompt = text
+                break
+
+        cleaned_instruction = str(edit_instruction or "").strip()
+        if not cleaned_instruction:
+            raise ValueError("edit_instruction is required")
+
+        if not original_prompt:
+            style_from_ctx = self._image_style_settings(ctx)
+            original_prompt = self._build_prompt(ctx, style_from_ctx, fmt=fmt)
+
+        revised_prompt = (
+            "ITERATION REQUEST (apply these changes while preserving the original concept):\n"
+            f"{cleaned_instruction}\n\n"
+            "ORIGINAL CREATIVE BRIEF:\n"
+            f"{original_prompt}\n"
+        ).strip()
+
+        recipe = self._recipe_for_format(fmt)
+        user_style = source_settings.get("image_style") if isinstance(source_settings.get("image_style"), dict) else {}
+        if not user_style:
+            user_style = self._image_style_settings(ctx)
+
+        strict_controls: dict[str, Any] = {
+            "artifact_format": fmt,
+            "tool_name": str(source_settings.get("tool_name") or "openai").strip().lower() or "openai",
+            "requested_tool_name": str(source_settings.get("tool_name") or "openai").strip().lower() or "openai",
+            "size": str(source_settings.get("size") or recipe.size).strip(),
+            "style": str(source_settings.get("style") or recipe.style).strip().lower(),
+            "quality": str(source_settings.get("quality") or self._map_output_fidelity_to_quality(user_style)).strip().lower(),
+            "export_format": str(source_settings.get("export_format") or recipe.export_format).strip().lower(),
+            "resize_mode": str(source_settings.get("resize_mode") or recipe.resize_mode).strip().lower(),
+            "sharpen": str(source_settings.get("sharpen") or recipe.sharpen).strip().lower(),
+            "denoise": str(source_settings.get("denoise") or recipe.denoise).strip().lower(),
+        }
+        output_formats = self._normalize_output_formats(source_settings.get("output_formats") or [strict_controls["export_format"]])
+
+        options = dict(user_style)
+        options.update(strict_controls)
+        options.setdefault("project_id", getattr(ctx, "project_id", "") or "")
+        options.setdefault("user_id", getattr(ctx, "user_id", "") or "")
+        options.setdefault("topic_title", getattr(ctx, "topic_title", "") or "")
+        # Forward-compatible payload for future edits/img2img connectors.
+        options["source_artifact"] = source_artifact
+        options["source_blob_paths"] = list(resolved_source_blob_paths)
+        options["source_image_blob_path"] = source_image_blob_path
+        options["source_image_mime_type"] = str(source_image_asset.get("mime_type") or "").strip() or "image/png"
+        options["source_image_uri"] = str(source_image_asset.get("uri") or "").strip() or None
+        options["source_image_bytes"] = source_image_bytes
+        if str(target_artifact_id or "").strip():
+            options["artifact_id"] = str(target_artifact_id).strip()
+
+        tool_name, connector = self._resolve_connector(options)
+        tool_response = connector(prompt=revised_prompt, output_formats=output_formats, options=options)
+
+        payload = default_payload_template()
+        payload["body"] = None
+        payload["assets"] = tool_response.get("images", [])
+        payload["prompts"] = [
+            {"name": "original_prompt", "text": original_prompt, "tool": "source_artifact"},
+            {"name": "iterate_instruction", "text": cleaned_instruction, "tool": "user"},
+            {"name": "image_prompt", "text": revised_prompt, "tool": tool_response.get("provider", tool_name)},
+        ]
+        payload["settings"] = {
+            "artifact_format": fmt,
+            "tool_name": tool_name,
+            "requested_tool_name": strict_controls["requested_tool_name"],
+            "output_formats": output_formats,
+            "size": strict_controls["size"],
+            "style": strict_controls["style"],
+            "quality": strict_controls["quality"],
+            "export_format": strict_controls["export_format"],
+            "resize_mode": strict_controls["resize_mode"],
+            "sharpen": strict_controls["sharpen"],
+            "denoise": strict_controls["denoise"],
+            "status": tool_response.get("status", "simulated"),
+            "generation_source": "iterate_edit",
+            "iterate_strategy": "prompt_regeneration",
+            "edit_instruction": cleaned_instruction,
+            "source_blob_paths": list(resolved_source_blob_paths),
+            "source_image_blob_path_used": source_image_blob_path,
+            "source_image_bytes_available": bool(source_image_bytes),
+        }
+
+        image_style_snapshot = self._normalized_image_style_snapshot(user_style)
+        if image_style_snapshot:
+            payload["settings"]["image_style"] = image_style_snapshot
+        if tool_response.get("error_message"):
+            payload["settings"]["error_message"] = str(tool_response.get("error_message"))
+        payload["notes"] = "Image iteration generated from original prompt + iterate instruction."
+
+        tags = source_artifact.get("tags_json") if isinstance(source_artifact, dict) and isinstance(source_artifact.get("tags_json"), list) else []
+        if not tags:
+            tags = [x for x in (ctx.seed_keywords or []) if isinstance(x, str) and x.strip()]
+        title = str(source_artifact.get("title") or "").strip() if isinstance(source_artifact, dict) else ""
+        if not title:
+            title = f"{getattr(ctx, 'topic_title', '')} - {fmt.replace('_', ' ').title()}".strip(" -")
         draft_status = str(tool_response.get("status") or "generated").strip().lower() or "generated"
         return ArtifactDraft(format=fmt, title=title, payload_json=payload, tags_json=tags, status=draft_status)
 

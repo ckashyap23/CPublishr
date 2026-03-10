@@ -9,7 +9,13 @@ from src.api.dependencies import get_current_user_id, get_db
 from src.contracts.prd import ArtifactEntity, ArtifactFormat, ArtifactKind, ArtifactListResponse
 from src.core.config import settings
 from src.db.repositories.artifact_repository import ArtifactRepository
-from src.schemas.artifacts import ArtifactGenerationRequest, ArtifactGenerationResponse, ArtifactTitleUpdateRequest
+from src.schemas.artifacts import (
+    ArtifactEditRequest,
+    ArtifactEditResponse,
+    ArtifactGenerationRequest,
+    ArtifactGenerationResponse,
+    ArtifactTitleUpdateRequest,
+)
 from src.services.orchestration.artifact_schema import formats_by_kind_map
 from src.services.orchestration.artifacts.contracts import GenerationOptions
 from src.services.orchestration.artifacts.orchestrator import ArtifactPipelineOrchestrator
@@ -139,6 +145,31 @@ def generate_artifacts(
         logger.exception("Artifact generation failed for project_id=%s", payload.project_id)
         raise HTTPException(status_code=500, detail=f"Artifact generation failed: {exc}") from exc
     return ArtifactGenerationResponse.model_validate(out)
+
+
+@router.post("/edit", response_model=ArtifactEditResponse)
+def edit_artifact(
+    payload: ArtifactEditRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> ArtifactEditResponse:
+    orchestrator = ArtifactPipelineOrchestrator(db, user_id=user_id)
+    try:
+        out = orchestrator.edit_artifact(
+            artifact_id=payload.artifact_id,
+            mode=payload.mode,
+            inline_content=payload.inline_content,
+            edit_instruction=payload.edit_instruction,
+            style_settings_by_kind=payload.style_settings_by_kind or {},
+            style_settings_by_format=payload.style_settings_by_format or {},
+            source_blob_paths=payload.source_blob_paths or [],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Artifact edit failed for artifact_id=%s mode=%s", payload.artifact_id, payload.mode)
+        raise HTTPException(status_code=500, detail=f"Artifact edit failed: {exc}") from exc
+    return ArtifactEditResponse.model_validate(out)
 
 
 @router.get("/{project_id}", response_model=ArtifactListResponse)

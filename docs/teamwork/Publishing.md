@@ -201,3 +201,9 @@ Current limitation:
 - Adapter list is dynamic: adding/removing adapter files changes `GET /platforms` output after backend restart.
 - The schema file was renamed to `publishing_schemas.py` to avoid confusion with the publishing service module.
 - Keep API schemas (`schemas/`) and service logic (`services/`) separate; do not merge them.
+
+---
+
+## Backend Update Reference
+
+Backend-side implemented changes (UI excluded) are tracked in [../../BACKEND_CHANGES.md](../../BACKEND_CHANGES.md).

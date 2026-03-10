@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -93,11 +95,73 @@ class ArtifactRepository:
         )
         return self.db.execute(stmt).scalars().first()
 
+    @staticmethod
+    def _artifact_has_blob_path(row: Artifact, blob_path: str) -> bool:
+        payload = row.payload_json if isinstance(row.payload_json, dict) else {}
+        assets = payload.get("assets") if isinstance(payload.get("assets"), list) else []
+        needle = str(blob_path or "").strip()
+        if not needle:
+            return False
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            candidate = str(asset.get("blob_path") or "").strip()
+            if candidate and candidate == needle:
+                return True
+        return False
+
+    def find_artifact_by_blob_path(self, *, project_id: str, blob_path: str) -> Artifact | None:
+        needle = str(blob_path or "").strip()
+        if not needle:
+            return None
+        for row in self.list_artifacts(project_id):
+            if self._artifact_has_blob_path(row, needle):
+                return row
+        return None
+
+    def find_artifacts_by_blob_paths(self, *, project_id: str, blob_paths: list[str]) -> list[Artifact]:
+        wanted = {str(path or "").strip() for path in blob_paths if str(path or "").strip()}
+        if not wanted:
+            return []
+        matched: list[Artifact] = []
+        for row in self.list_artifacts(project_id):
+            for path in wanted:
+                if self._artifact_has_blob_path(row, path):
+                    matched.append(row)
+                    break
+        return matched
+
     def update_title(self, artifact_id: str, title: str | None) -> Artifact | None:
         row = self.get_artifact(artifact_id)
         if row is None:
             return None
         row.title = title
+        self.db.add(row)
+        self.db.commit()
+        self.db.refresh(row)
+        return row
+
+    def update_artifact(
+        self,
+        artifact_id: str,
+        *,
+        title: str | None = None,
+        payload_json: dict | None = None,
+        tags_json: list[str] | None = None,
+        status: str | None = None,
+    ) -> Artifact | None:
+        row = self.get_artifact(artifact_id)
+        if row is None:
+            return None
+        if title is not None:
+            row.title = title
+        if payload_json is not None:
+            row.payload_json = payload_json
+        if tags_json is not None:
+            row.tags_json = tags_json
+        if status is not None:
+            row.status = status
+        row.updated_at = datetime.utcnow()
         self.db.add(row)
         self.db.commit()
         self.db.refresh(row)

@@ -99,8 +99,8 @@ def run_research_node(
     ctx = NodeExecutionContext(
         project_id=project_id,
         run_id="node1",
-        input_payload={"project_id": project_id},
-        state={"context_bundle": _context_bundle_from_topic(req)},
+        input_payload={"project_id": project_id, "user_id": user_id},
+        state={"context_bundle": _context_bundle_from_topic(req), "user_id": user_id},
     )
     return ResearchTrendResponse.model_validate(engine.node1.run(ctx).output_payload)
 
@@ -120,8 +120,8 @@ def run_research_node_post(
     ctx = NodeExecutionContext(
         project_id=req.project_id,
         run_id="node1_post",
-        input_payload={"project_id": req.project_id},
-        state={"context_bundle": bundle},
+        input_payload={"project_id": req.project_id, "user_id": user_id},
+        state={"context_bundle": bundle, "user_id": user_id},
     )
     return ResearchTrendResponse.model_validate(engine.node1.run(ctx).output_payload)
 
@@ -137,8 +137,8 @@ def run_master_node(
     ctx = NodeExecutionContext(
         project_id=project_id,
         run_id="node2",
-        input_payload={"project_id": project_id},
-        state={"context_bundle": _context_bundle_from_topic(req)},
+        input_payload={"project_id": project_id, "user_id": user_id},
+        state={"context_bundle": _context_bundle_from_topic(req), "user_id": user_id},
     )
     ctx.state["research"] = engine.node1.run(ctx).output_payload
     out = MasterContentResponse.model_validate(engine.node2.run(ctx).output_payload)
@@ -191,8 +191,8 @@ def run_master_node_post(
     ctx = NodeExecutionContext(
         project_id=req.project_id,
         run_id="node2_post",
-        input_payload={"project_id": req.project_id},
-        state={"context_bundle": bundle},
+        input_payload={"project_id": req.project_id, "user_id": user_id},
+        state={"context_bundle": bundle, "user_id": user_id},
     )
     ctx.state["research"] = (
         payload.research.model_dump()

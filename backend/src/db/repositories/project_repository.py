@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.db.models.artifact import Artifact
@@ -105,13 +106,43 @@ class ProjectRepository:
         except json.JSONDecodeError:
             return None
 
-    def list_projects(self, limit: int = 50) -> list[Project]:
+    def _ensure_projects_from_activity(self) -> None:
+        """Backfill missing project rows from user-scoped activity tables."""
+        existing_ids = set(
+            self.db.execute(
+                select(Project.project_id).where(Project.user_id == self.user_id)
+            ).scalars().all()
+        )
+        candidate_ids: set[str] = set()
+        for model in (ContentVersion, PlatformOutput, PublishJob, EditorialSession, Artifact):
+            ids = self.db.execute(
+                select(model.project_id).where(model.user_id == self.user_id).distinct()
+            ).scalars().all()
+            for pid in ids:
+                value = str(pid or "").strip()
+                if value:
+                    candidate_ids.add(value)
+
+        missing = sorted(candidate_ids - existing_ids)
+        if not missing:
+            return
+
+        for pid in missing:
+            self.db.add(Project(project_id=pid, user_id=self.user_id, status="draft"))
+        try:
+            self.db.commit()
+        except IntegrityError:
+            self.db.rollback()
+
+    def list_projects(self, limit: int | None = None) -> list[Project]:
+        self._ensure_projects_from_activity()
         stmt = (
             select(Project)
             .where(Project.user_id == self.user_id)
             .order_by(Project.created_at.desc())
-            .limit(limit)
         )
+        if isinstance(limit, int) and limit > 0:
+            stmt = stmt.limit(limit)
         return list(self.db.execute(stmt).scalars().all())
 
     def set_final_version(self, project_id: str, final_version_number: int) -> Project:

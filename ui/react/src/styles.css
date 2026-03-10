@@ -11,6 +11,42 @@
 * { box-sizing: border-box; }
 body { margin: 0; font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: var(--text); }
 .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+.top-banner {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: rgba(255, 255, 255, 0.96);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+.top-banner-inner {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.top-banner-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.top-banner-logo {
+  width: 220px;
+  height: 72px;
+  object-fit: contain;
+}
+.top-banner-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.top-banner-buttons {
+  justify-content: flex-end;
+  gap: 10px;
+}
+.top-banner-user {
+  margin: 0;
+  text-align: right;
+}
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
 h1, h2, h3 { margin-top: 0; }
 .grid { display: grid; gap: 12px; }
@@ -72,6 +108,24 @@ option {
   font-size: 14px;
 }
 textarea { min-height: 96px; resize: vertical; }
+.suggestive-placeholder::placeholder {
+  color: #98a4b5;
+  font-style: italic;
+}
+textarea.artifact-edit-textarea {
+  min-height: 180px;
+  max-height: none;
+  overflow-y: hidden;
+}
+textarea.editorial-edit-textarea {
+  min-height: 180px;
+  max-height: none;
+  overflow-y: hidden;
+}
+.editorial-content-block {
+  max-height: none;
+  overflow: visible;
+}
 button { border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer; font-weight: 600; }
 button.primary { background: var(--primary); color: #fff; }
 button.secondary { background: #eaf0ff; color: #173f91; }
@@ -92,6 +146,8 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
   border-color: #8fb4ff;
 }
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.editorial-split { grid-template-columns: minmax(0, 7fr) minmax(0, 3fr); }
+.editorial-split-inline { grid-template-columns: minmax(0, 1fr); }
 pre.content { background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 12px; white-space: pre-wrap; max-height: 420px; overflow: auto; }
 .artifact-render {
   background: #f8fafc;
@@ -170,17 +226,17 @@ pre.content { background: #f8fafc; border: 1px solid var(--border); border-radiu
 .artifact-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 220px));
-  gap: 10px;
+  gap: 14px;
   justify-content: start;
 }
 .artifact-select-card {
   text-align: left;
   border-radius: 12px;
   border: 1px solid #bfd3ff;
-  padding: 12px;
+  padding: 8px 10px;
   background: #edf3ff;
   color: inherit;
-  min-height: 74px;
+  min-height: 62px;
 }
 .artifact-select-card-missing {
   background: #dce9ff;
@@ -196,12 +252,13 @@ pre.content { background: #f8fafc; border: 1px solid var(--border); border-radiu
 }
 .artifact-select-card-title {
   font-weight: 700;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 .artifact-select-card-desc {
   font-size: 12px;
   color: var(--muted);
-  margin-bottom: 6px;
+  margin-bottom: 0;
+  line-height: 1.25;
 }
 .artifact-select-card-status {
   font-size: 12px;
@@ -338,19 +395,6 @@ pre.content { background: #f8fafc; border: 1px solid var(--border); border-radiu
   align-items: center;
   gap: 6px;
 }
-.artifact-title-edit-btn {
-  padding: 6px 10px;
-  font-size: 12px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 120ms ease;
-}
-.artifact-title-chip:hover .artifact-title-edit-btn,
-.artifact-title-chip:focus-within .artifact-title-edit-btn,
-.artifact-title-chip-active .artifact-title-edit-btn {
-  opacity: 1;
-  pointer-events: auto;
-}
 .artifact-ps-note {
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -467,4 +511,26 @@ pre.content { background: #f8fafc; border: 1px solid var(--border); border-radiu
   .grid.two, .split { grid-template-columns: 1fr; }
   .publish-source-compact-row { grid-template-columns: 1fr; align-items: stretch; }
   .publish-source-actions { justify-self: start; }
+  .top-banner-logo {
+    width: 180px;
+    height: 58px;
+  }
+  .top-banner-actions {
+    width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .top-banner-inner .row {
+    align-items: flex-start;
+  }
+  .top-banner-actions {
+    align-items: stretch;
+  }
+  .top-banner-buttons {
+    justify-content: flex-start;
+  }
+  .top-banner-user {
+    text-align: left;
+  }
 }

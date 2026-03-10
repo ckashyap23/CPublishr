@@ -1,3 +1,4 @@
+# video_generation.py
 from __future__ import annotations
 
 import logging
@@ -15,11 +16,13 @@ import httpx
 from src.core.config import settings
 from src.services.orchestration.artifact_schema import default_payload_template
 from src.services.orchestration.artifacts.contracts import ArtifactDraft, PipelineContext
-from src.services.storage.artifact_blob_storage import upload_bytes
+from src.services.orchestration.artifacts.persistence import (
+    save_video_bytes_to_local,
+    upload_artifact_bytes,
+    video_output_dir,
+)
 
 logger = logging.getLogger(__name__)
-
-VIDEOS_DIR = Path(__file__).resolve().parent / "videos"
 
 # Supported builder formats (UI-facing)
 VIDEO_FORMATS = {"gif", "reel", "short_video"}
@@ -29,6 +32,7 @@ VIDEO_FORMATS = {"gif", "reel", "short_video"}
 # Azure Sora 1 (Preview) API
 # =============================================================================
 
+
 @dataclass(frozen=True)
 class AzureSoraPreviewConfig:
     endpoint: str
@@ -37,7 +41,6 @@ class AzureSoraPreviewConfig:
 
 
 def _get_azure_sora_preview_config() -> AzureSoraPreviewConfig | None:
-    # Use settings from config.py (loaded from .env) instead of os.getenv()
     endpoint = (settings.azure_sora_endpoint or "").strip().rstrip("/")
     api_key = (settings.azure_sora_api_key or "").strip()
     api_version = (settings.azure_sora_api_version or "").strip() or "preview"
@@ -93,7 +96,12 @@ def _sora_create_job(
         logger.error("Azure Sora create failed: endpoint=%s deployment=%s error=%s", cfg.endpoint, deployment_name, msg)
         return None, msg
     except Exception as e:
-        logger.error("Azure Sora create exception: endpoint=%s deployment=%s error=%s", cfg.endpoint, deployment_name, str(e))
+        logger.error(
+            "Azure Sora create exception: endpoint=%s deployment=%s error=%s",
+            cfg.endpoint,
+            deployment_name,
+            str(e),
+        )
         return None, str(e)
 
 
@@ -178,42 +186,27 @@ def _sora_download_video(
 
 
 # =============================================================================
-# Local file helpers
-# =============================================================================
-
-def _save_bytes_to_disk(
-    data: bytes,
-    *,
-    ext: str,
-    project_id: str = "",
-    topic_title: str = "",
-    prefix: str = "clip",
-) -> Path | None:
-    try:
-        VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
-        slug = re.sub(r"[^\w\-]", "_", (topic_title or project_id or prefix)[:60]).strip("_") or prefix
-        filename = f"{slug}_{int(time.time() * 1000)}.{ext}"
-        path = VIDEOS_DIR / filename
-        path.write_bytes(data)
-        return path
-    except Exception as e:
-        logger.warning("Failed to save video bytes to disk: %s", e)
-        return None
-
-
-# =============================================================================
 # FFMPEG stitcher + GIF exporter (best-effort)
 # =============================================================================
 
+
+def _ffmpeg_bin() -> str:
+    """Return the ffmpeg executable path. Reads FFMPEG_PATH env var, falls back to 'ffmpeg' on PATH."""
+    return os.environ.get("FFMPEG_PATH", "").strip() or "ffmpeg"
+
+
 def _ffmpeg_exists() -> bool:
     try:
-        subprocess.run(["ffmpeg", "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        subprocess.run([_ffmpeg_bin(), "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
         return True
     except Exception:
         return False
 
 
 def _run_ffmpeg(cmd: list[str]) -> tuple[bool, str | None]:
+    # Replace bare "ffmpeg" at position 0 with the resolved binary path
+    if cmd and cmd[0] == "ffmpeg":
+        cmd = [_ffmpeg_bin()] + cmd[1:]
     try:
         proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
         if proc.returncode != 0:
@@ -318,6 +311,7 @@ def _mp4_to_gif(
 # Format recipes (strict composition defaults injected into prompt)
 # =============================================================================
 
+
 @dataclass(frozen=True)
 class VideoRecipe:
     n_seconds: int
@@ -334,6 +328,91 @@ class VideoRecipe:
     composition_defaults: dict[str, Any]
 
 
+# =============================================================================
+# Enum label expansions (raw dropdown value → descriptive phrase for prompt)
+# Unknown/custom values pass through unchanged.
+# =============================================================================
+
+_VIDEO_ENUM_EXPANSIONS: dict[str, dict[str, str]] = {
+    "mood": {
+        "playful": "playful, light, and fun",
+        "serious": "serious and authoritative",
+        "premium": "premium, sophisticated, luxury feel",
+        "cozy": "warm, cozy, and inviting",
+        "dramatic": "dramatic, high-contrast, intense",
+        "energetic": "energetic and dynamic",
+        "inspiring": "uplifting and inspiring",
+        "suspenseful": "tense and suspenseful with building tension",
+        "mysterious": "mysterious and enigmatic",
+        "whimsical": "whimsical and dreamy",
+        "futuristic": "sleek futuristic aesthetic",
+        "nostalgic": "nostalgic, warm vintage feel",
+    },
+    "lighting": {
+        "soft_daylight": "soft natural daylight",
+        "golden_hour": "warm golden hour lighting",
+        "sunset_warm": "warm sunset glow",
+        "overcast_diffused": "overcast diffused ambient light",
+        "studio_softbox": "studio softbox lighting",
+        "high_key_bright": "high-key bright even lighting",
+        "low_key_moody": "low-key moody shadows",
+        "neon_night": "neon-lit nighttime atmosphere",
+        "backlit_silhouette": "backlit subject creating silhouette effect",
+        "rim_light": "rim/edge lighting separating subject from background",
+        "volumetric_godrays": "volumetric god rays filtering through atmosphere",
+        "dramatic_spotlight": "dramatic hard spotlight",
+    },
+    "palette_mode": {
+        "brand": "brand color palette (see brand colors below)",
+        "monochrome": "monochromatic single-tone palette",
+        "pastel": "soft pastel tones, low saturation",
+        "neon": "vivid neon colors, high saturation",
+        "earthy": "earthy organic tones, warm browns and greens",
+        "muted": "muted desaturated tones, soft contrast",
+        "high_contrast": "high contrast colors, strong separation",
+    },
+    "output_fidelity": {
+        "standard": "clean and polished, suitable for social media",
+        "pro": "cinematic, high production value, detail-rich textures",
+    },
+    "camera_motion": {
+        "slow_dolly_in": "slow dolly-in toward subject",
+        "orbital_drift": "slow orbital drift around subject",
+        "tracking_follow": "tracking follow shot",
+        "static_locked": "static locked-off shot, no camera movement",
+        "handheld_documentary": "handheld documentary-style movement",
+        "push_pull_oscillate": "slow oscillating push-pull (zoom in and out)",
+    },
+    "energy_level": {
+        "low": "calm and deliberate",
+        "medium": "balanced and steady",
+        "high": "energetic and fast-paced",
+    },
+}
+
+
+def _expand_video_enum(field: str, value: str) -> str:
+    """Return the expanded descriptive phrase for a known enum value, or the raw value if unknown."""
+    return _VIDEO_ENUM_EXPANSIONS.get(field, {}).get(value, value)
+
+
+# Maps user energy_level to pacing + motion_intensity overrides for composition_defaults
+_VIDEO_ENERGY_LEVEL_MAP: dict[str, tuple[str, str]] = {
+    "low": ("slow", "low"),
+    "medium": ("medium", "medium"),
+    "high": ("fast", "high"),
+}
+
+
+# Narrative roles for short_video segments (injected per-clip into _build_segments)
+_SHORT_VIDEO_SEGMENT_ROLES: dict[int, str] = {
+    1: "Establishing shot — introduce the subject, setting, and visual identity. Use wide or medium framing.",
+    2: "Development 1 — closer engagement with the subject; reveal a detail or show progression.",
+    3: "Development 2 — continue progression from a different angle or action phase.",
+    4: "Development 3 — peak action or highest engagement moment of the scene.",
+    5: "Resolution/Outro — pull back or show a concluding moment; provide visual closure.",
+}
+
 VIDEO_RECIPES: dict[str, VideoRecipe] = {
     "gif": VideoRecipe(
         n_seconds=4,
@@ -342,11 +421,16 @@ VIDEO_RECIPES: dict[str, VideoRecipe] = {
         pro_wh=(1080, 1080),
         export_format="gif",
         fps_target=12,
-        prompt_hint="animated GIF loop (4 seconds); motion cyclical and seamless; avoid cuts",
+        prompt_hint=(
+            "animated GIF loop (4 seconds, seamless); end frame identical to start frame; "
+            "prefer subtle oscillating motion (slow zoom bloom, push-pull, parallax layer shift) "
+            "over large linear displacement; bold flat tones preferred — avoid heavy cinematic "
+            "gradients and soft bokeh which degrade in 256-color GIF palette"
+        ),
         composition_defaults={
             "pacing": "medium",
             "motion_intensity": "medium",
-            "camera_motion": "static_tripod",
+            "camera_motion": "subtle_oscillating_loop",
             "overlay": "none",
             "negative_space": "low",
         },
@@ -358,7 +442,12 @@ VIDEO_RECIPES: dict[str, VideoRecipe] = {
         pro_wh=(1080, 1920),
         export_format="mp4",
         fps_target=24,
-        prompt_hint="vertical reel (10-12 seconds); single continuous shot; strong hook in first 2 seconds",
+        prompt_hint=(
+            "vertical reel (9:16 full bleed, 10-12 seconds); single continuous uninterrupted shot; "
+            "subject in upper 65% of frame — bottom 35% is platform UI safe zone (captions, likes, share); "
+            "hook: first 2 seconds show motion toward camera, subject reveal, or high-contrast flash; "
+            "rhythmically paced motion throughout; no letterboxing or black bars"
+        ),
         composition_defaults={
             "duration_sec": "10-12",
             "pacing": "fast",
@@ -366,6 +455,7 @@ VIDEO_RECIPES: dict[str, VideoRecipe] = {
             "camera_motion": "slow_dolly_in",
             "overlay": "lower_third",
             "subtitle_safe": "on",
+            "frame_safe_zone": "subject_upper_65pct",
         },
     ),
     "short_video": VideoRecipe(
@@ -375,7 +465,11 @@ VIDEO_RECIPES: dict[str, VideoRecipe] = {
         pro_wh=(1920, 1080),
         export_format="mp4",
         fps_target=24,
-        prompt_hint="short video (1 minute) assembled from 5 clips of 12s; maintain continuity scene-to-scene",
+        prompt_hint=(
+            "short video (1 minute) assembled from 5 clips of 12s each; narrative arc: "
+            "establishing shot → development → resolution; same characters, lighting, and color grading "
+            "across all clips; each clip advances the scene"
+        ),
         composition_defaults={
             "duration_sec": "60",
             "clip_count": 5,
@@ -389,27 +483,33 @@ VIDEO_RECIPES: dict[str, VideoRecipe] = {
 }
 
 
-
 # =============================================================================
 # Builder
 # =============================================================================
 
+
 class VideoArtifactsBuilder:
     """
-    - Reordered prompt so user inputs + strict format defaults take precedence.
-    - include_master_content flag controls whether master content is appended as low-priority reference context.
-    - Azure Sora 1 preview generates MP4 clips.
-    - short_video: stitches 5 clips into a final MP4 (ffmpeg best-effort).
-    - gif: converts MP4 -> GIF (ffmpeg best-effort).
+    Implements:
+      - build(): generate video from user inputs + strict per-format recipe.
+      - edit(): iterate video by reusing source prompt/style and applying edit_instruction + style overrides.
+    Prompt policy:
+      - Primary brief first (user + strict defaults).
+      - Constraints early.
+      - Master content optional, appended last when include_master_content=True.
+
+    Storage policy:
+      - Individual clips uploaded to Azure blob.
+      - Final asset (gif/reel/stitched) uploaded when possible.
+      - Local/blob persistence delegated to orchestration artifacts persistence module.
     """
 
     kind = "video"
     formats = set(VIDEO_FORMATS)
 
-    # -------------------------
-    # Inputs / settings helpers
-    # -------------------------
-
+    # -------------------------------------------------------------------------
+    # Style helpers / merge
+    # -------------------------------------------------------------------------
     @staticmethod
     def _safe_text(value: Any, fallback: str = "not specified", max_len: int = 1200) -> str:
         text = str(value or "").strip()
@@ -429,7 +529,40 @@ class VideoArtifactsBuilder:
         return default
 
     @staticmethod
+    def _clean_dict(d: Any) -> dict[str, Any]:
+        if not isinstance(d, dict):
+            return {}
+        out: dict[str, Any] = {}
+        for k, v in d.items():
+            if v in (None, "", [], {}):
+                continue
+            if isinstance(v, str):
+                v = v.strip()
+                if not v:
+                    continue
+            out[k] = v
+        return out
+
+    @staticmethod
+    def _merge_dicts(base: dict[str, Any] | None, override: dict[str, Any] | None) -> dict[str, Any]:
+        out = dict(base or {})
+        for k, v in (override or {}).items():
+            if v is None:
+                continue
+            if isinstance(v, dict) and isinstance(out.get(k), dict):
+                merged = dict(out[k])
+                merged.update({kk: vv for kk, vv in v.items() if vv is not None})
+                out[k] = merged
+            else:
+                out[k] = v
+        return out
+
+    @staticmethod
     def _video_style_settings(ctx: PipelineContext) -> dict[str, Any]:
+        """
+        build(): ctx.style_settings contains full video style
+        edit(): ctx.style_settings contains overrides (optional)
+        """
         if isinstance(ctx.style_settings, dict) and ctx.style_settings:
             return dict(ctx.style_settings)
         if isinstance(getattr(ctx, "video_style_settings", None), dict):
@@ -443,27 +576,7 @@ class VideoArtifactsBuilder:
         return VIDEO_RECIPES[fmt]
 
     @staticmethod
-    def _grounding_excerpt_for_prompt(fmt: str, ctx: PipelineContext) -> str:
-        """
-        Keep master-content grounding intentionally light; it's lowest priority.
-        """
-        master_body = str(getattr(ctx, "master_body", "") or "").strip()
-        if not master_body:
-            return ""
-
-        if fmt in {"gif", "reel"}:
-            max_len = 240
-        else:
-            max_len = 700
-
-        excerpt = re.sub(r"\s+", " ", master_body[:max_len]).strip()
-        return excerpt
-
-    @staticmethod
     def _merge_avoid(video_style: dict[str, Any]) -> list[str]:
-        """
-        Canonicalize + dedupe avoid tags, and add safe defaults for video generation.
-        """
         def canon(tag: str) -> str:
             t = re.sub(r"\s+", " ", str(tag or "").strip().lower())
             t = t.replace("-", " ")
@@ -533,17 +646,35 @@ class VideoArtifactsBuilder:
         poll_interval = as_int("AZURE_SORA_POLL_INTERVAL_SECONDS", 5, 2, 60)
         return max_wait, poll_interval
 
-    # -------------------------
-    # Prompt building (reordered + include_master_content)
-    # -------------------------
+    @staticmethod
+    def _grounding_excerpt_for_prompt(fmt: str, ctx: PipelineContext) -> str:
+        master_body = str(getattr(ctx, "master_body", "") or "").strip()
+        if not master_body:
+            return ""
+        max_len = 240 if fmt in {"gif", "reel"} else 700
+        return re.sub(r"\s+", " ", master_body[:max_len]).strip()
 
+    @staticmethod
+    def _normalized_video_style_snapshot(video_style: dict[str, Any], *, include_master: bool) -> dict[str, Any]:
+        snap: dict[str, Any] = {
+            "theme": video_style.get("theme"),
+            "subject_prompt": video_style.get("core_prompt") or video_style.get("subject_prompt") or video_style.get("subject"),
+            "avoid": video_style.get("avoid"),
+            "mood": video_style.get("mood"),
+            "lighting": video_style.get("lighting"),
+            "palette_mode": video_style.get("palette_mode") or video_style.get("color_palette") or video_style.get("color_pallete"),
+            "brand_colors": video_style.get("brand_colors"),
+            "output_fidelity": video_style.get("output_fidelity"),
+            "camera_motion": video_style.get("camera_motion") or None,
+            "energy_level": video_style.get("energy_level") or None,
+            "include_master_content": include_master,
+        }
+        return {k: v for k, v in snap.items() if v not in (None, "", [], {})}
+
+    # -------------------------------------------------------------------------
+    # Prompt building (precedence-first + include_master_content)
+    # -------------------------------------------------------------------------
     def _build_prompt(self, *, fmt: str, ctx: PipelineContext, video_style: dict[str, Any], recipe: VideoRecipe) -> str:
-        """
-        Prompt policy:
-          - User inputs + strict format defaults come first (highest priority).
-          - Constraints are early.
-          - Master content is OPTIONAL and appended last only when include_master_content=True.
-        """
         include_master_content = self._as_bool(video_style.get("include_master_content"), default=False)
 
         def safe(v: Any, n: int) -> str:
@@ -554,24 +685,39 @@ class VideoArtifactsBuilder:
         tone = safe(getattr(ctx, "tone_preference", None) or "professional", 60)
         topic_title = safe(getattr(ctx, "topic_title", None) or "this topic", 140)
 
-        # Creative direction (aliases supported)
         theme = safe(video_style.get("theme"), 240)
         subject_prompt = safe(
-            video_style.get("core_prompt")
-            or video_style.get("subject_prompt")
-            or video_style.get("subject"),
+            video_style.get("core_prompt") or video_style.get("subject_prompt") or video_style.get("subject"),
             1600,
         )
-        # Visual style
-        mood = safe(video_style.get("mood"), 80)
-        lighting = safe(video_style.get("lighting"), 80)
-        palette_mode = safe(video_style.get("palette_mode") or video_style.get("color_palette") or video_style.get("color_pallete"), 80)
-        output_fidelity = safe(video_style.get("output_fidelity"), 20)
+        mood_raw = safe(video_style.get("mood"), 80)
+        mood = _expand_video_enum("mood", mood_raw) if mood_raw else ""
+
+        lighting_raw = safe(video_style.get("lighting"), 80)
+        lighting = _expand_video_enum("lighting", lighting_raw) if lighting_raw else ""
+
+        palette_mode_raw = safe(video_style.get("palette_mode") or video_style.get("color_palette") or video_style.get("color_pallete"), 80)
+        palette_mode = _expand_video_enum("palette_mode", palette_mode_raw) if palette_mode_raw else ""
+
+        output_fidelity_raw = safe(video_style.get("output_fidelity"), 20)
+        output_fidelity = _expand_video_enum("output_fidelity", output_fidelity_raw) if output_fidelity_raw else ""
+
+        camera_motion_raw = safe(video_style.get("camera_motion"), 60)
+        energy_level_raw = safe(video_style.get("energy_level"), 20)
+
         brand_colors = video_style.get("brand_colors") if isinstance(video_style.get("brand_colors"), dict) else {}
 
         avoid = self._merge_avoid(video_style)
 
-        # PRIMARY BRIEF (highest priority)
+        # Merge user overrides on top of recipe composition defaults
+        effective_composition = dict(recipe.composition_defaults)
+        if camera_motion_raw:
+            effective_composition["camera_motion"] = camera_motion_raw
+        if energy_level_raw in _VIDEO_ENERGY_LEVEL_MAP:
+            pacing, intensity = _VIDEO_ENERGY_LEVEL_MAP[energy_level_raw]
+            effective_composition["pacing"] = pacing
+            effective_composition["motion_intensity"] = intensity
+
         primary: list[str] = []
         primary.append(f"FORMAT INTENT: {recipe.prompt_hint}")
         primary.append("PRIORITY: Follow the brief below strictly. Use reference context only if it does not conflict.")
@@ -583,19 +729,43 @@ class VideoArtifactsBuilder:
             primary.append(f"Theme: {theme}.")
         primary.append(f"SUBJECT (most important): {subject_prompt}")
 
-        # Strict composition defaults in PRIMARY (so it never gets truncated away)
-        if recipe.composition_defaults:
-            primary.append(
-                "STANDARD COMPOSITION CONTROLS (apply strictly): "
-                + ", ".join(f"{k}={v}" for k, v in recipe.composition_defaults.items())
-            )
+        if effective_composition:
+            cam_label = _expand_video_enum("camera_motion", effective_composition.get("camera_motion", "")) or effective_composition.get("camera_motion", "")
+            energy_label = _expand_video_enum("energy_level", energy_level_raw) if energy_level_raw else ""
+            controls_parts = []
+            for k, v in effective_composition.items():
+                if k == "camera_motion" and cam_label:
+                    controls_parts.append(f"camera_motion={cam_label}")
+                else:
+                    controls_parts.append(f"{k}={v}")
+            composition_line = "STANDARD COMPOSITION CONTROLS (apply strictly): " + ", ".join(controls_parts)
+            if energy_label:
+                composition_line += f". Overall energy: {energy_label}."
+            primary.append(composition_line)
 
         if fmt == "gif":
-            primary.append("GIF rule: motion must be cyclical so the clip loops seamlessly.")
+            primary.append(
+                "GIF rule: motion must be cyclical — start frame and end frame must be visually identical "
+                "so the clip loops seamlessly. Use oscillating motion (slow zoom, bloom, parallax layer shift); "
+                "avoid large linear camera moves that drift. Use bold flat tones; avoid heavy cinematic gradients "
+                "or soft bokeh that degrade in a 256-color GIF palette."
+            )
+        if fmt == "reel":
+            primary.append(
+                "Reel rule: 9:16 full bleed — no letterboxing or black bars. "
+                "Subject must occupy the upper 65% of the vertical frame; bottom 35% is reserved for platform UI "
+                "(captions, like/share buttons). "
+                "Hook: the first 2 seconds must feature motion toward camera, a subject reveal, or a high-contrast visual flash. "
+                "Single uninterrupted camera move from start to end; motion should feel rhythmically paced."
+            )
         if fmt == "short_video" and recipe.clip_count > 1:
-            primary.append("Continuity rule: same characters/setting/visual identity across all clips; smooth progression scene-to-scene.")
+            primary.append(
+                "Short video rule: 5 clips form a narrative arc — establishing shot → development → resolution. "
+                "Same characters, lighting setup, color grading, and location across all clips. "
+                "Each clip advances the scene; avoid showing identical frames across clips. "
+                "Implied cuts between clips should feel natural (match on action preferred)."
+            )
 
-        # VISUAL STYLE
         style_lines: list[str] = []
         if mood:
             style_lines.append(f"Mood: {mood}.")
@@ -603,20 +773,18 @@ class VideoArtifactsBuilder:
             style_lines.append(f"Lighting: {lighting}.")
         if palette_mode:
             style_lines.append(f"Palette mode: {palette_mode}.")
-            if palette_mode == "brand" and brand_colors:
+            if palette_mode_raw == "brand" and brand_colors:
                 pairs = [f"{k}={v}" for k, v in brand_colors.items() if str(v).strip()]
                 if pairs:
                     style_lines.append("Brand colors: " + ", ".join(pairs) + ".")
         if output_fidelity:
-            style_lines.append(f"Output fidelity: {output_fidelity}.")
+            style_lines.append(f"Visual quality: {output_fidelity}.")
 
-        # CONSTRAINTS (early)
         constraints: list[str] = []
         constraints.append("Do not generate readable on-screen text or typography (we will overlay text later).")
         if avoid:
             constraints.append("Avoid: " + ", ".join(avoid) + ".")
 
-        # REFERENCE CONTEXT (lowest priority, optional)
         reference_block = ""
         if include_master_content:
             ref_parts: list[str] = []
@@ -642,20 +810,28 @@ class VideoArtifactsBuilder:
     @staticmethod
     def _build_segments(*, clip_count: int, base_prompt: str) -> list[dict[str, Any]]:
         n = max(1, int(clip_count))
+        use_story_arc = n == len(_SHORT_VIDEO_SEGMENT_ROLES)
         segments: list[dict[str, Any]] = []
         for i in range(1, n + 1):
-            seg_prompt = (
-                f"{base_prompt}\n\n"
-                f"SEGMENT {i}/{n}:\n"
-                f"Maintain continuity with other segments; consistent setting and style.\n"
-            )
+            if use_story_arc:
+                role = _SHORT_VIDEO_SEGMENT_ROLES.get(i, f"Segment {i}/{n}: continue narrative progression.")
+                seg_prompt = (
+                    f"{base_prompt}\n\n"
+                    f"SEGMENT {i}/{n} — {role}\n"
+                    f"Maintain consistent lighting, color palette, and visual identity with all other segments.\n"
+                )
+            else:
+                seg_prompt = (
+                    f"{base_prompt}\n\n"
+                    f"SEGMENT {i}/{n}:\n"
+                    f"Maintain continuity with other segments; consistent setting and style.\n"
+                )
             segments.append({"index": i, "prompt": seg_prompt})
         return segments
 
-    # -------------------------
+    # -------------------------------------------------------------------------
     # Generation + exporting
-    # -------------------------
-
+    # -------------------------------------------------------------------------
     def _generate_clips(
         self,
         *,
@@ -666,10 +842,11 @@ class VideoArtifactsBuilder:
         recipe: VideoRecipe,
         width: int,
         height: int,
-        base_prompt: str,
         segments: list[dict[str, Any]],
         max_wait_seconds: int,
         poll_interval_seconds: int,
+        target_artifact_id: str | None = None,
+        filename_prefix: str | None = None,
     ) -> tuple[list[dict[str, Any]], list[Path], list[str]]:
         project_id = str(getattr(ctx, "project_id", "") or "")
         user_id = str(getattr(ctx, "user_id", "") or "")
@@ -680,8 +857,11 @@ class VideoArtifactsBuilder:
         errors: list[str] = []
 
         for seg in segments:
-            seg_idx = int(seg["index"])
-            seg_prompt = str(seg["prompt"])
+            seg_idx = int(seg.get("index") or 0)
+            seg_prompt = str(seg.get("prompt") or "").strip()
+            if not seg_prompt:
+                errors.append(f"Missing prompt for segment {seg_idx}")
+                continue
 
             job_id, err = _sora_create_job(
                 cfg=cfg,
@@ -728,8 +908,8 @@ class VideoArtifactsBuilder:
                 errors.append(dl_err or f"Failed to download video for generation {generation_id}")
                 continue
 
-            saved = _save_bytes_to_disk(
-                mp4_bytes,
+            saved = save_video_bytes_to_local(
+                data=mp4_bytes,
                 ext="mp4",
                 project_id=project_id,
                 topic_title=topic_title,
@@ -738,14 +918,21 @@ class VideoArtifactsBuilder:
             if saved:
                 local_mp4_paths.append(saved)
 
-            filename = saved.name if saved else f"{fmt}_clip_{seg_idx}_{int(time.time()*1000)}.mp4"
-            artifact_key = saved.stem if saved else f"{fmt}_clip_{seg_idx}_{int(time.time()*1000)}"
+            # Deterministic naming support for versioning.
+            # Orchestrator can pass target_artifact_id and filename_prefix like "<source_slug>_v2".
+            file_prefix = (filename_prefix or "").strip() or f"{fmt}_clip_{seg_idx}"
+            filename = saved.name if saved else f"{file_prefix}_{int(time.time()*1000)}.mp4"
 
-            blob_ref = upload_bytes(
+            # Keep clip artifact_id stable per "target_artifact_id" if provided, else derive.
+            # NOTE: If target_artifact_id is a single id for the whole artifact, we suffix it per segment.
+            base_id = str(target_artifact_id or "").strip()
+            artifact_key = f"{base_id}_seg{seg_idx}" if base_id else (saved.stem if saved else f"{fmt}_clip_{seg_idx}_{int(time.time()*1000)}")
+
+            blob_ref = upload_artifact_bytes(
                 data=mp4_bytes,
                 user_id=user_id or "user",
                 project_id=project_id or "project",
-                format=fmt,
+                fmt=fmt,
                 artifact_id=artifact_key,
                 filename=filename,
                 content_type="video/mp4",
@@ -779,27 +966,31 @@ class VideoArtifactsBuilder:
         ctx: PipelineContext,
         recipe: VideoRecipe,
         local_clip_paths: list[Path],
+        target_artifact_id: str | None = None,
+        filename_prefix: str | None = None,
     ) -> tuple[dict[str, Any] | None, str | None]:
         project_id = str(getattr(ctx, "project_id", "") or "")
         user_id = str(getattr(ctx, "user_id", "") or "")
         topic_title = str(getattr(ctx, "topic_title", "") or "")
+        video_output_dir().mkdir(parents=True, exist_ok=True)
 
         if not local_clip_paths:
             return None, "No local clip files available for export (stitch/convert skipped)."
 
-        # Reel: treat first clip as "final" (no ffmpeg)
+        # Reel: treat first clip as final
         if fmt == "reel":
             p = local_clip_paths[0]
             if not p.exists():
                 return None, "Reel clip missing on disk."
             data = p.read_bytes()
-            final_name = f"{re.sub(r'[^\w\-]', '_', (topic_title or 'reel')[:60]).strip('_')}_{int(time.time()*1000)}.mp4"
-            artifact_key = f"reel_final_{int(time.time()*1000)}"
-            blob_ref = upload_bytes(
+            base = re.sub(r"[^\w\-]", "_", (filename_prefix or topic_title or "reel")[:60]).strip("_") or "reel"
+            final_name = f"{base}_{int(time.time()*1000)}.mp4"
+            artifact_key = str(target_artifact_id or "").strip() or f"reel_final_{int(time.time()*1000)}"
+            blob_ref = upload_artifact_bytes(
                 data=data,
                 user_id=user_id or "user",
                 project_id=project_id or "project",
-                format="reel_final",
+                fmt="reel_final",
                 artifact_id=artifact_key,
                 filename=final_name,
                 content_type="video/mp4",
@@ -815,29 +1006,36 @@ class VideoArtifactsBuilder:
                 "source": "azure_blob" if blob_ref else "local_disk",
             }, None
 
-        # short_video: stitch all clips into final mp4
+        # short_video: stitch
         if fmt == "short_video":
             if len(local_clip_paths) < recipe.clip_count:
                 return None, f"Expected {recipe.clip_count} local clips for stitching, found {len(local_clip_paths)}."
 
-            out_mp4 = _save_bytes_to_disk(
-                b"", ext="mp4", project_id=project_id, topic_title=topic_title, prefix=f"{fmt}_final"
+            out_mp4 = save_video_bytes_to_local(
+                data=b"",
+                ext="mp4",
+                project_id=project_id,
+                topic_title=topic_title,
+                prefix=f"{fmt}_final",
             )
             if not out_mp4:
-                out_mp4 = VIDEOS_DIR / f"{fmt}_final_{int(time.time()*1000)}.mp4"
+                out_mp4 = video_output_dir() / f"{fmt}_final_{int(time.time()*1000)}.mp4"
 
             stitched, err = _concat_mp4(local_clip_paths[: recipe.clip_count], out_path=out_mp4)
             if err or not stitched:
                 return None, f"Stitching failed: {err}"
 
             data = stitched.read_bytes()
-            blob_ref = upload_bytes(
+            artifact_key = str(target_artifact_id or "").strip() or stitched.stem
+            base = re.sub(r"[^\w\-]", "_", (filename_prefix or stitched.stem)[:80]).strip("_") or stitched.stem
+            final_name = f"{base}_{int(time.time()*1000)}.mp4"
+            blob_ref = upload_artifact_bytes(
                 data=data,
                 user_id=user_id or "user",
                 project_id=project_id or "project",
-                format="short_video_final",
-                artifact_id=stitched.stem,
-                filename=stitched.name,
+                fmt="short_video_final",
+                artifact_id=artifact_key,
+                filename=final_name,
                 content_type="video/mp4",
             )
             uri = blob_ref["uri"] if blob_ref else str(stitched)
@@ -857,19 +1055,22 @@ class VideoArtifactsBuilder:
             if not mp4_path.exists():
                 return None, "GIF source clip missing on disk."
 
-            out_gif = VIDEOS_DIR / f"gif_final_{int(time.time()*1000)}.gif"
+            out_gif = video_output_dir() / f"gif_final_{int(time.time()*1000)}.gif"
             gif_path, err = _mp4_to_gif(mp4_path=mp4_path, gif_path=out_gif, fps=recipe.fps_target, width=720)
             if err or not gif_path:
                 return None, f"GIF conversion failed: {err}"
 
             data = gif_path.read_bytes()
-            blob_ref = upload_bytes(
+            artifact_key = str(target_artifact_id or "").strip() or gif_path.stem
+            base = re.sub(r"[^\w\-]", "_", (filename_prefix or gif_path.stem)[:80]).strip("_") or gif_path.stem
+            final_name = f"{base}_{int(time.time()*1000)}.gif"
+            blob_ref = upload_artifact_bytes(
                 data=data,
                 user_id=user_id or "user",
                 project_id=project_id or "project",
-                format="gif_final",
-                artifact_id=gif_path.stem,
-                filename=gif_path.name,
+                fmt="gif_final",
+                artifact_id=artifact_key,
+                filename=final_name,
                 content_type="image/gif",
             )
             uri = blob_ref["uri"] if blob_ref else str(gif_path)
@@ -885,73 +1086,67 @@ class VideoArtifactsBuilder:
 
         return None, f"No export logic for format '{fmt}'."
 
-    # -------------------------
-    # Public build()
-    # -------------------------
+    # -------------------------------------------------------------------------
+    # Validation: required UI inputs
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def _validate_required_video_inputs(video_style: dict[str, Any]) -> list[str]:
+        theme = str(video_style.get("theme") or "").strip()
+        subject = str(video_style.get("core_prompt") or video_style.get("subject_prompt") or video_style.get("subject") or "").strip()
+        missing: list[str] = []
+        if not theme:
+            missing.append("theme")
+        if not subject:
+            missing.append("subject/core_prompt")
+        return missing
 
+    # -------------------------------------------------------------------------
+    # build()
+    # -------------------------------------------------------------------------
     def build(self, *, fmt: str, ctx: PipelineContext) -> ArtifactDraft:
         if fmt not in self.formats:
             raise ValueError(f"Unsupported video format for video builder: {fmt}")
 
         recipe = self._resolve_recipe(fmt)
         cfg = _get_azure_sora_preview_config()
+        deployment_name = self._deployment_name()
         video_style = self._video_style_settings(ctx)
 
         payload = default_payload_template()
 
-        deployment_name = self._deployment_name()
+        # Validate config
         if not cfg:
-            payload["body"] = None
-            payload["assets"] = []
-            payload["prompts"] = []
             payload["settings"] = {
                 "format": fmt,
                 "generation_source": "azure_sora_preview",
                 "video_generation_status": "failed",
                 "error_message": "Missing Azure Sora config in settings (azure_sora_endpoint / azure_sora_api_key).",
             }
-            title = f"{ctx.topic_title} - {fmt}".strip(" -")
+            title = str(getattr(ctx, "topic_title", "") or "").strip() or f"video - {fmt}"
             tags = [str(x).strip() for x in (ctx.seed_keywords or []) if str(x).strip()]
             return ArtifactDraft(format=fmt, title=title, payload_json=payload, tags_json=tags, status="failed")
 
         if not deployment_name:
-            payload["body"] = None
-            payload["assets"] = []
-            payload["prompts"] = []
             payload["settings"] = {
                 "format": fmt,
                 "generation_source": "azure_sora_preview",
                 "video_generation_status": "failed",
                 "error_message": "Missing Azure Sora deployment name in settings (azure_sora_deployment_name).",
             }
-            title = f"{ctx.topic_title} - {fmt}".strip(" -")
+            title = str(getattr(ctx, "topic_title", "") or "").strip() or f"video - {fmt}"
             tags = [str(x).strip() for x in (ctx.seed_keywords or []) if str(x).strip()]
             return ArtifactDraft(format=fmt, title=title, payload_json=payload, tags_json=tags, status="failed")
 
-        # Enforce mandatory UI inputs at backend level as well.
-        theme = str(video_style.get("theme") or "").strip()
-        subject = str(
-            video_style.get("core_prompt")
-            or video_style.get("subject_prompt")
-            or video_style.get("subject")
-            or ""
-        ).strip()
-        if not theme or not subject:
-            missing: list[str] = []
-            if not theme:
-                missing.append("theme")
-            if not subject:
-                missing.append("subject/core_prompt")
-            payload["body"] = None
-            payload["assets"] = []
-            payload["prompts"] = []
+        # Validate mandatory user inputs
+        missing_inputs = self._validate_required_video_inputs(video_style)
+        if missing_inputs:
             payload["settings"] = {
                 "format": fmt,
                 "generation_source": "azure_sora_preview",
                 "video_generation_status": "failed",
-                "error_message": f"Missing required video style input(s): {', '.join(missing)}.",
+                "error_message": f"Missing required video style input(s): {', '.join(missing_inputs)}.",
             }
-            title = f"{ctx.topic_title} - {fmt}".strip(" -")
+            title = str(getattr(ctx, "topic_title", "") or "").strip() or f"video - {fmt}"
             tags = [str(x).strip() for x in (ctx.seed_keywords or []) if str(x).strip()]
             return ArtifactDraft(format=fmt, title=title, payload_json=payload, tags_json=tags, status="failed")
 
@@ -969,7 +1164,6 @@ class VideoArtifactsBuilder:
             recipe=recipe,
             width=width,
             height=height,
-            base_prompt=base_prompt,
             segments=segments,
             max_wait_seconds=max_wait_seconds,
             poll_interval_seconds=poll_interval_seconds,
@@ -977,11 +1171,16 @@ class VideoArtifactsBuilder:
 
         final_asset: dict[str, Any] | None = None
         if clip_assets:
-            final_asset, final_err = self._export_final_asset(fmt=fmt, ctx=ctx, recipe=recipe, local_clip_paths=local_clip_paths)
+            final_asset, final_err = self._export_final_asset(
+                fmt=fmt,
+                ctx=ctx,
+                recipe=recipe,
+                local_clip_paths=local_clip_paths,
+            )
             if final_err:
+                logger.error("Video final export failed: fmt=%s project_id=%s error=%s", fmt, getattr(ctx, "project_id", ""), final_err)
                 errors.append(final_err)
 
-        # Payload assembly
         payload["body"] = None
         payload["assets"] = list(clip_assets)
         if final_asset:
@@ -1017,21 +1216,8 @@ class VideoArtifactsBuilder:
             "clip_count": recipe.clip_count,
             "composition_defaults": recipe.composition_defaults,
             "stitch_plan": stitch_plan,
+            "video_style": self._normalized_video_style_snapshot(video_style, include_master=include_master),
         }
-
-        # Store compact snapshot of UI inputs (normalized + include flag)
-        snap: dict[str, Any] = {
-            "theme": video_style.get("theme"),
-            "subject_prompt": video_style.get("core_prompt") or video_style.get("subject_prompt") or video_style.get("subject"),
-            "avoid": video_style.get("avoid"),
-            "mood": video_style.get("mood"),
-            "lighting": video_style.get("lighting"),
-            "palette_mode": video_style.get("palette_mode") or video_style.get("color_palette") or video_style.get("color_pallete"),
-            "brand_colors": video_style.get("brand_colors"),
-            "output_fidelity": video_style.get("output_fidelity"),
-            "include_master_content": include_master,
-        }
-        payload["settings"]["video_style"] = {k: v for k, v in snap.items() if v not in (None, "", [], {})}
 
         if errors:
             payload["settings"]["error_message"] = "; ".join([e for e in errors if e])[:2000]
@@ -1042,8 +1228,219 @@ class VideoArtifactsBuilder:
             "Clips are uploaded individually. short_video is stitched when ffmpeg is available; gif is converted when ffmpeg is available."
         )
 
-        title = f"{ctx.topic_title} - {fmt}".strip(" -")
+        # Title/tags
+        custom_title = ""
+        if isinstance(getattr(ctx, "style_settings", None), dict):
+            custom_title = str(ctx.style_settings.get("default_artifact_title") or "").strip()
+        if custom_title and len(getattr(ctx, "requested_formats", []) or []) > 1:
+            title = f"{custom_title} - {fmt.replace('_', ' ').title()}"
+        else:
+            title = custom_title or f"{getattr(ctx, 'topic_title', '')} - {fmt}".strip(" -")
         tags = [str(x).strip() for x in (ctx.seed_keywords or []) if str(x).strip()]
+
+        return ArtifactDraft(format=fmt, title=title, payload_json=payload, tags_json=tags, status=status)
+
+    # -------------------------------------------------------------------------
+    # edit(): iterate video
+    # -------------------------------------------------------------------------
+    def edit(
+        self,
+        *,
+        fmt: str,
+        ctx: PipelineContext,
+        source_artifact: dict[str, Any],
+        edit_instruction: str,
+        target_artifact_id: str | None = None,
+        source_blob_paths: list[str] | None = None,
+        filename_prefix: str | None = None,
+    ) -> ArtifactDraft:
+        _ = source_blob_paths  # kept for future image-to-video / video-to-video workflows
+
+        if fmt not in self.formats:
+            raise ValueError(f"Unsupported video format for video builder edit: {fmt}")
+
+        cleaned_instruction = str(edit_instruction or "").strip()
+        if not cleaned_instruction:
+            raise ValueError("edit_instruction is required")
+
+        recipe = self._resolve_recipe(fmt)
+        cfg = _get_azure_sora_preview_config()
+        deployment_name = self._deployment_name()
+        payload = default_payload_template()
+
+        # Extract source payload/style/prompt
+        source_id = str(source_artifact.get("artifact_id") or source_artifact.get("id") or "").strip()
+        source_payload = source_artifact.get("payload_json") if isinstance(source_artifact, dict) else {}
+        source_payload = source_payload if isinstance(source_payload, dict) else {}
+        source_settings = source_payload.get("settings") if isinstance(source_payload.get("settings"), dict) else {}
+        source_prompts = source_payload.get("prompts") if isinstance(source_payload.get("prompts"), list) else []
+
+        # Prefer original video prompt if present
+        original_prompt = ""
+        for item in source_prompts:
+            if isinstance(item, dict) and str(item.get("name") or "") in {"video_prompt", "prompt"}:
+                t = str(item.get("text") or "").strip()
+                if t:
+                    original_prompt = t
+                    break
+        if not original_prompt:
+            for item in source_prompts:
+                if not isinstance(item, dict):
+                    continue
+                t = str(item.get("text") or "").strip()
+                if t:
+                    original_prompt = t
+                    break
+
+        base_style = source_settings.get("video_style") if isinstance(source_settings.get("video_style"), dict) else {}
+        override_style = self._video_style_settings(ctx)  # overrides from UI
+        effective_style = self._merge_dicts(self._clean_dict(base_style), self._clean_dict(override_style))
+
+        # Ensure include_master_content flag can be overridden (default False for video)
+        if "include_master_content" not in effective_style and "include_master_content" in base_style:
+            effective_style["include_master_content"] = base_style.get("include_master_content")
+
+        if not original_prompt:
+            original_prompt = self._build_prompt(fmt=fmt, ctx=ctx, video_style=effective_style, recipe=recipe)
+
+        revised_prompt = (
+            f"{original_prompt}\n\n"
+            "ITERATION REQUEST (apply these changes while preserving core scene identity):\n"
+            f"{cleaned_instruction}\n"
+        ).strip()
+
+        # Validate config
+        if not cfg or not deployment_name:
+            payload["body"] = None
+            payload["assets"] = []
+            payload["prompts"] = [
+                {"name": "original_prompt", "text": original_prompt, "tool": "source_artifact"},
+                {"name": "iterate_instruction", "text": cleaned_instruction, "tool": "user"},
+                {"name": "video_prompt", "text": revised_prompt, "tool": "azure_sora_preview"},
+            ]
+            payload["settings"] = {
+                "format": fmt,
+                "generation_source": "iterate_edit",
+                "video_generation_status": "failed",
+                "error_message": "Missing Azure Sora config/deployment for iterate edit.",
+                "edit_instruction": cleaned_instruction,
+            }
+            title = str(source_artifact.get("title") or "").strip() or f"{getattr(ctx, 'topic_title', '')} - {fmt}".strip(" -")
+            tags = source_artifact.get("tags_json") if isinstance(source_artifact, dict) and isinstance(source_artifact.get("tags_json"), list) else []
+            if not tags:
+                tags = [str(x).strip() for x in (ctx.seed_keywords or []) if str(x).strip()]
+            return ArtifactDraft(format=fmt, title=title, payload_json=payload, tags_json=tags, status="failed")
+
+        # Validate required inputs AFTER merge (so overrides can satisfy them)
+        missing_inputs = self._validate_required_video_inputs(effective_style)
+        if missing_inputs:
+            payload["settings"] = {
+                "format": fmt,
+                "generation_source": "iterate_edit",
+                "video_generation_status": "failed",
+                "error_message": f"Missing required video style input(s): {', '.join(missing_inputs)}.",
+                "edit_instruction": cleaned_instruction,
+            }
+            title = str(source_artifact.get("title") or "").strip() or f"{getattr(ctx, 'topic_title', '')} - {fmt}".strip(" -")
+            tags = source_artifact.get("tags_json") if isinstance(source_artifact, dict) and isinstance(source_artifact.get("tags_json"), list) else []
+            if not tags:
+                tags = [str(x).strip() for x in (ctx.seed_keywords or []) if str(x).strip()]
+            return ArtifactDraft(format=fmt, title=title, payload_json=payload, tags_json=tags, status="failed")
+
+        width, height = self._resolve_resolution(recipe, effective_style)
+        max_wait_seconds, poll_interval_seconds = self._polling_controls()
+        segments = self._build_segments(clip_count=recipe.clip_count, base_prompt=revised_prompt)
+
+        clip_assets, local_clip_paths, errors = self._generate_clips(
+            cfg=cfg,
+            deployment_name=deployment_name,
+            fmt=fmt,
+            ctx=ctx,
+            recipe=recipe,
+            width=width,
+            height=height,
+            segments=segments,
+            max_wait_seconds=max_wait_seconds,
+            poll_interval_seconds=poll_interval_seconds,
+            target_artifact_id=target_artifact_id,
+            filename_prefix=filename_prefix,
+        )
+
+        final_asset: dict[str, Any] | None = None
+        if clip_assets:
+            final_asset, final_err = self._export_final_asset(
+                fmt=fmt,
+                ctx=ctx,
+                recipe=recipe,
+                local_clip_paths=local_clip_paths,
+                target_artifact_id=target_artifact_id,
+                filename_prefix=filename_prefix,
+            )
+            if final_err:
+                logger.error("Video final export failed during iterate: fmt=%s project_id=%s error=%s", fmt, getattr(ctx, "project_id", ""), final_err)
+                errors.append(final_err)
+
+        payload["body"] = None
+        payload["assets"] = list(clip_assets)
+        if final_asset:
+            payload["assets"].append(final_asset)
+
+        payload["prompts"] = [
+            {"name": "original_prompt", "text": original_prompt, "tool": "source_artifact"},
+            {"name": "iterate_instruction", "text": cleaned_instruction, "tool": "user"},
+            {"name": "video_prompt", "text": revised_prompt, "tool": "azure_sora_preview"},
+        ]
+
+        stitch_plan = {
+            "clip_count": recipe.clip_count,
+            "clip_seconds": recipe.n_seconds,
+            "segments": [{"index": s["index"]} for s in segments],
+            "output": recipe.export_format,
+            "convert_to_gif": True if fmt == "gif" else False,
+            "loop_gif": True if fmt == "gif" else False,
+            "fps_target": recipe.fps_target,
+            "ffmpeg_available": _ffmpeg_exists(),
+        }
+
+        status = "generated" if clip_assets else "failed"
+        if clip_assets and fmt in {"short_video", "gif"} and not final_asset:
+            status = "partial"
+
+        include_master = self._as_bool(effective_style.get("include_master_content"), default=False)
+
+        payload["settings"] = {
+            "format": fmt,
+            "generation_source": "iterate_edit",
+            "video_generation_status": status,
+            "deployment_name": deployment_name,
+            "width": width,
+            "height": height,
+            "seconds": recipe.n_seconds,
+            "clip_count": recipe.clip_count,
+            "composition_defaults": recipe.composition_defaults,
+            "stitch_plan": stitch_plan,
+            "edit_instruction": cleaned_instruction,
+            "video_style": self._normalized_video_style_snapshot(effective_style, include_master=include_master),
+            "source_artifact_id": source_id or None,
+        }
+
+        if errors:
+            payload["settings"]["error_message"] = "; ".join([e for e in errors if e])[:2000]
+
+        payload["notes"] = "Video iteration generated from original prompt + iterate instruction (prompt-regeneration)."
+
+        title = str(source_artifact.get("title") or "").strip() if isinstance(source_artifact, dict) else ""
+        if not title:
+            title = f"{getattr(ctx, 'topic_title', '')} - {fmt}".strip(" -")
+
+        tags = (
+            source_artifact.get("tags_json")
+            if isinstance(source_artifact, dict) and isinstance(source_artifact.get("tags_json"), list)
+            else []
+        )
+        if not tags:
+            tags = [str(x).strip() for x in (ctx.seed_keywords or []) if str(x).strip()]
+
         return ArtifactDraft(format=fmt, title=title, payload_json=payload, tags_json=tags, status=status)
 
 

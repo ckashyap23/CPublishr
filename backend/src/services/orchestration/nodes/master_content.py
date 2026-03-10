@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from src.services.llm.azure_openai import AzureOpenAIClient, parse_json_object
 from src.services.orchestration.contracts import NodeExecutionContext, NodeExecutionResult
 from src.services.orchestration.nodes.base import OrchestrationNode
+from src.services.storage.prompt_blob_storage import format_chat_prompt_text, save_prompt_text
 
 logger = logging.getLogger(__name__)
 
@@ -394,6 +395,9 @@ class MasterContentNode(OrchestrationNode):
         editorial_brief: Dict[str, Any],
         research_context: str,
         title: str,
+        user_id: str,
+        project_id: str,
+        prompt_name: str,
     ) -> str:
         if not (self.llm and self.llm.enabled):
             return bad_doc
@@ -424,6 +428,14 @@ Title: {title}
 Document to fix:
 {bad_doc}
 """.strip()
+        save_prompt_text(
+            user_id=user_id,
+            project_id=project_id,
+            section="master-content",
+            name=prompt_name,
+            suffix="repair",
+            text=format_chat_prompt_text(system_prompt=repair_system, user_prompt=repair_user),
+        )
 
         fixed = self.llm.chat(
             system_prompt=repair_system,
@@ -519,6 +531,8 @@ Document to fix:
     def run(self, context: NodeExecutionContext) -> NodeExecutionResult:
         b: Dict[str, Any] = context.state.get("context_bundle") or {}
         r: Dict[str, Any] = context.state.get("research") or {}
+        user_id = str(context.state.get("user_id") or context.input_payload.get("user_id") or "user").strip() or "user"
+        project_id = str(context.project_id or context.input_payload.get("project_id") or "project").strip() or "project"
 
         title = (b.get("topic_title") or "AI Topic").strip()
         core = (b.get("core_idea") or "One idea, many platform formats.").strip()
@@ -659,6 +673,14 @@ Requirements:
 """.strip()
 
             try:
+                save_prompt_text(
+                    user_id=user_id,
+                    project_id=project_id,
+                    section="master-content",
+                    name="master_content",
+                    suffix="base",
+                    text=format_chat_prompt_text(system_prompt=base_system_prompt, user_prompt=base_user_prompt),
+                )
                 raw = self.llm.chat(
                     system_prompt=base_system_prompt,
                     user_prompt=base_user_prompt,
@@ -680,6 +702,9 @@ Requirements:
                             editorial_brief=editorial_brief,
                             research_context=research_context,
                             title=title,
+                            user_id=user_id,
+                            project_id=project_id,
+                            prompt_name="master_content",
                         )
 
                     structure_outline = parsed.get("structure_outline")
@@ -776,6 +801,15 @@ Also:
 - {variant_outline_instruction}
 - Keep output grounded: do NOT invent facts beyond research_context. Unknown -> "not specified".
 """.strip()
+                        variant_name = str(spec.label or spec.id or "variant").strip() or "variant"
+                        save_prompt_text(
+                            user_id=user_id,
+                            project_id=project_id,
+                            section="master-content",
+                            name=variant_name,
+                            suffix="variant",
+                            text=format_chat_prompt_text(system_prompt=base_system_prompt, user_prompt=variant_user_prompt),
+                        )
 
                         try:
                             v_raw = self.llm.chat(
@@ -800,6 +834,9 @@ Also:
                                     editorial_brief=editorial_brief,
                                     research_context=research_context,
                                     title=title,
+                                    user_id=user_id,
+                                    project_id=project_id,
+                                    prompt_name=variant_name,
                                 )
 
                             v_outline_raw = v_parsed.get("structure_outline")

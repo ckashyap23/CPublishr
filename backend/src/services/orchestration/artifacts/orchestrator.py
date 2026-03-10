@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import asdict, replace
 from typing import Any
 
@@ -11,11 +13,20 @@ from src.db.repositories.project_repository import ProjectRepository
 from src.services.orchestration.artifact_schema import allowed_formats, normalize_payload, validate_payload_shape
 from src.services.orchestration.artifacts.contracts import ArtifactDraft, GenerationOptions, PipelineContext
 from src.services.orchestration.artifacts.formats.registry import get_kind_by_format, resolve_builder
+from src.services.storage.artifact_blob_storage import overwrite_blob_text
+from src.services.storage.prompt_blob_storage import save_prompt_text
 from src.utils.ids import new_id
 
 
 class ArtifactPipelineOrchestrator:
     """Per-format artifact generation pipeline (no stage fan-out)."""
+    QC_PROMPT_SUFFIXES = {
+        "build": "build_prompt",
+        "edit_inline": "edit_inline",
+        "edit_original": "original_prompt",
+        "edit_instruction": "edit_instruction",
+        "edit_effective": "edit_prompt",
+    }
 
     def __init__(self, db: Session, user_id: str):
         self.db = db
@@ -213,6 +224,127 @@ class ArtifactPipelineOrchestrator:
                 if s and s not in acc:
                     acc.append(s)
         return acc
+
+    @staticmethod
+    def _extract_prompt_text(payload: dict[str, Any], *, preferred_names: list[str] | None = None) -> str:
+        prompts = payload.get("prompts") if isinstance(payload.get("prompts"), list) else []
+        names = [str(x).strip().lower() for x in (preferred_names or []) if str(x).strip()]
+        if names:
+            for item in prompts:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or "").strip().lower()
+                text = str(item.get("text") or "").strip()
+                if name in names and text:
+                    return text
+        for item in prompts:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text") or "").strip()
+            if text:
+                return text
+        return ""
+
+    def _save_qc_format_prompt(
+        self,
+        *,
+        project_id: str,
+        kind: str,
+        name: str,
+        suffix: str,
+        text: str,
+        subfolder: str | None = None,
+    ) -> dict[str, str] | None:
+        if not str(text or "").strip():
+            return None
+        resolved_subfolder = str(subfolder or "").strip() or str(kind or "artifact")
+        return save_prompt_text(
+            user_id=self.user_id,
+            project_id=project_id,
+            section="qc-formats",
+            subfolder=resolved_subfolder,
+            name=str(name or "artifact"),
+            suffix=str(suffix or "prompt"),
+            text=str(text),
+        )
+
+    @staticmethod
+    def _qc_prompt_name_for_build(*, fmt: str, artifact_id: str | None, title: str | None) -> str:
+        safe_fmt = str(fmt or "artifact").strip() or "artifact"
+        safe_id = str(artifact_id or "").strip() or "na"
+        safe_title = str(title or "").strip() or "artifact"
+        return f"{safe_fmt}_{safe_id}_{safe_title}"
+
+    @staticmethod
+    def _qc_prompt_name_for_edit(source: Any) -> str:
+        safe_fmt = str(getattr(source, "format", "") or "").strip() or "artifact"
+        safe_id = str(getattr(source, "artifact_id", "") or "").strip() or "na"
+        safe_title = str(getattr(source, "title", "") or "").strip() or "artifact"
+        return f"{safe_fmt}_{safe_id}_{safe_title}"
+
+    def _save_build_prompts_for_draft(
+        self,
+        *,
+        project_id: str,
+        fmt: str,
+        draft: ArtifactDraft,
+        artifact_id: str | None,
+        title: str | None,
+    ) -> dict[str, str] | None:
+        payload = draft.payload_json if isinstance(draft.payload_json, dict) else {}
+        prompt_text = self._extract_prompt_text(
+            payload,
+            preferred_names=["artifact_prompt", "iterate_prompt", "image_prompt", "video_prompt"],
+        )
+        kind = str(get_kind_by_format().get(fmt) or "artifact")
+        ref = self._save_qc_format_prompt(
+            project_id=project_id,
+            kind=kind,
+            name=self._qc_prompt_name_for_build(fmt=fmt, artifact_id=artifact_id, title=title),
+            suffix=self.QC_PROMPT_SUFFIXES["build"],
+            text=prompt_text,
+        )
+        if not ref:
+            return None
+
+        settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
+        settings["qc_prompt_blob_path"] = ref.get("blob_path")
+        settings["qc_prompt_uri"] = ref.get("uri")
+        payload["settings"] = settings
+
+        prompts = payload.get("prompts") if isinstance(payload.get("prompts"), list) else []
+        preferred_names = {"artifact_prompt", "iterate_prompt", "image_prompt", "video_prompt"}
+        attached = False
+        for item in prompts:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip().lower()
+            text = str(item.get("text") or "").strip()
+            if name in preferred_names and text:
+                item["blob_path"] = ref.get("blob_path")
+                item["uri"] = ref.get("uri")
+                attached = True
+                break
+        if not attached and prompt_text:
+            prompts.append(
+                {
+                    "name": "qc_prompt",
+                    "text": prompt_text,
+                    "tool": "azure_blob",
+                    "blob_path": ref.get("blob_path"),
+                    "uri": ref.get("uri"),
+                }
+            )
+        payload["prompts"] = prompts
+        draft.payload_json = payload
+        return ref
+
+    @staticmethod
+    def _qc_iteration_subfolder(*, kind: str, qc_name: str, iteration_number: int) -> str:
+        safe_kind = str(kind or "artifact").strip() or "artifact"
+        safe_name = str(qc_name or "artifact").strip() or "artifact"
+        safe_iteration = max(1, int(iteration_number or 1))
+        return f"{safe_kind}/{safe_name}_iterations/v{safe_iteration}"
 
     @staticmethod
     def _style_settings_for_format(
@@ -455,6 +587,298 @@ class ArtifactPipelineOrchestrator:
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }
 
+    @staticmethod
+    def _inline_content_to_payload(*, fmt: str, payload: dict[str, Any], inline_content: str) -> dict[str, Any]:
+        out = normalize_payload(payload)
+        text = str(inline_content or "")
+        if fmt == "script_short":
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            out["body"] = None
+            out["items"] = [
+                {"item_type": "beat", "sequence": i + 1, "text": ln}
+                for i, ln in enumerate(lines)
+            ]
+            return out
+        if fmt == "cta_variants":
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            out["body"] = None
+            out["items"] = [
+                {"item_type": "cta", "sequence": i + 1, "text": ln}
+                for i, ln in enumerate(lines)
+            ]
+            return out
+        out["body"] = text
+        return out
+
+    @staticmethod
+    def _find_first_text_blob_asset(payload: dict[str, Any]) -> dict[str, Any] | None:
+        assets = payload.get("assets")
+        if not isinstance(assets, list):
+            return None
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            blob_path = str(asset.get("blob_path") or "").strip()
+            if not blob_path:
+                continue
+            mime = str(asset.get("mime_type") or "").strip().lower()
+            fmt = str(asset.get("format") or "").strip().lower()
+            if mime.startswith("text/") or "json" in mime or fmt in {"txt", "json"}:
+                return asset
+        return None
+
+    @staticmethod
+    def _extract_text_for_blob(*, fmt: str, payload: dict[str, Any]) -> tuple[str, str]:
+        if fmt == "script_short" or fmt == "cta_variants":
+            return (json.dumps(payload, ensure_ascii=False, indent=2), "application/json")
+        body = payload.get("body")
+        return (str(body) if body is not None else "", "text/plain; charset=utf-8")
+
+    @staticmethod
+    def _split_title_version(title: str | None) -> tuple[str, int | None]:
+        raw = str(title or "").strip()
+        if not raw:
+            return ("Artifact", None)
+        m = re.match(r"^(.*?)\s+v(\d+)$", raw, flags=re.IGNORECASE)
+        if not m:
+            return (raw, None)
+        base = str(m.group(1) or "").strip() or "Artifact"
+        try:
+            version = int(m.group(2))
+        except Exception:
+            version = None
+        return (base, version)
+
+    @classmethod
+    def _next_iterated_title_and_version(cls, source_title: str | None, siblings: list[Any]) -> tuple[str, int]:
+        base, source_version = cls._split_title_version(source_title)
+        pattern = re.compile(rf"^{re.escape(base)}\s+v(\d+)$", re.IGNORECASE)
+        max_v = max(1, int(source_version or 1))
+        for row in siblings:
+            title = str(getattr(row, "title", "") or "").strip()
+            if not title:
+                continue
+            if title.lower() == base.lower():
+                max_v = max(max_v, 1)
+                continue
+            m = pattern.match(title)
+            if not m:
+                continue
+            try:
+                max_v = max(max_v, int(m.group(1)))
+            except Exception:
+                continue
+        next_v = max_v + 1
+        return (f"{base} v{next_v}", next_v)
+
+    def _resolve_source_artifacts_from_blob_paths(self, *, project_id: str, blob_paths: list[str]) -> list[dict[str, Any]]:
+        rows = self.artifacts.find_artifacts_by_blob_paths(project_id=project_id, blob_paths=blob_paths)
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in rows:
+            key = str(getattr(row, "artifact_id", "") or "")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(self._to_entity_dict(row))
+        return out
+
+    def _to_entity_dict(self, row) -> dict[str, Any]:
+        return {
+            "artifact_id": row.artifact_id,
+            "project_id": row.project_id,
+            "format": row.format,
+            "kind": row.kind,
+            "title": row.title,
+            "payload_json": row.payload_json or {},
+            "tags_json": row.tags_json or [],
+            "status": row.status,
+            "revision": row.revision,
+            "parent_artifact_id": row.parent_artifact_id,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+
+    def edit_artifact(
+        self,
+        *,
+        artifact_id: str,
+        mode: str,
+        inline_content: str | None = None,
+        edit_instruction: str | None = None,
+        style_settings_by_kind: dict[str, dict[str, Any]] | None = None,
+        style_settings_by_format: dict[str, dict[str, Any]] | None = None,
+        source_blob_paths: list[str] | None = None,
+    ) -> dict[str, Any]:
+        source = self.artifacts.get_artifact(artifact_id)
+        if source is None:
+            raise ValueError("Artifact not found")
+
+        edit_mode = str(mode or "").strip().lower()
+        if edit_mode not in {"inline", "iterate"}:
+            raise ValueError("mode must be 'inline' or 'iterate'")
+
+        if edit_mode == "inline":
+            if str(source.kind or "").strip().lower() != "text":
+                raise ValueError("Inline edit is only supported for text artifacts")
+            next_text = str(inline_content or "")
+            self._save_qc_format_prompt(
+                project_id=source.project_id,
+                kind=str(source.kind or "text"),
+                name=self._qc_prompt_name_for_edit(source),
+                suffix=self.QC_PROMPT_SUFFIXES["edit_inline"],
+                text=next_text,
+            )
+            payload = self._inline_content_to_payload(
+                fmt=str(source.format or ""),
+                payload=(source.payload_json or {}),
+                inline_content=next_text,
+            )
+
+            # Overwrite original text blob (same blob path + same artifact id lineage).
+            text_blob_asset = self._find_first_text_blob_asset(payload)
+            if text_blob_asset:
+                blob_path = str(text_blob_asset.get("blob_path") or "").strip()
+                if blob_path:
+                    blob_text, blob_content_type = self._extract_text_for_blob(fmt=str(source.format or ""), payload=payload)
+                    blob_ref = overwrite_blob_text(blob_path=blob_path, text=blob_text, content_type=blob_content_type)
+                    if blob_ref and blob_ref.get("uri"):
+                        text_blob_asset["uri"] = blob_ref["uri"]
+
+            updated = self.artifacts.update_artifact(
+                artifact_id,
+                payload_json=payload,
+                status="edited_inline",
+            )
+            if updated is None:
+                raise ValueError("Failed to update artifact")
+            return {"status": "edited_inline", "artifact": self._to_entity_dict(updated)}
+
+        # Iterate mode: pass-through plumbing for format builders to implement edit() later.
+        builder = resolve_builder(str(source.format or ""))
+        if builder is None:
+            raise ValueError(f"No format builder registered for format '{source.format}'")
+
+        edit_fn = getattr(builder, "edit", None)
+        if not callable(edit_fn):
+            raise ValueError(
+                f"Iterate edit is not implemented for format '{source.format}'. "
+                "Add `edit(fmt, ctx, source_artifact, edit_instruction, target_artifact_id, source_blob_paths)` in the builder."
+            )
+
+        style_by_kind = style_settings_by_kind or {}
+        style_by_format = style_settings_by_format or {}
+        ctx = self._build_context(
+            project_id=source.project_id,
+            requested_formats=[str(source.format or "")],
+            style_settings_by_kind=style_by_kind,
+            style_settings_by_format=style_by_format,
+        )
+        fmt = str(source.format or "")
+        fmt_ctx = replace(
+            ctx,
+            style_settings=self._style_settings_for_format(
+                fmt,
+                by_kind=style_by_kind,
+                by_format=style_by_format,
+            ),
+        )
+
+        source_artifact_dict = self._to_entity_dict(source)
+        source_payload = source_artifact_dict.get("payload_json") if isinstance(source_artifact_dict.get("payload_json"), dict) else {}
+        source_prompts = source_payload.get("prompts") if isinstance(source_payload.get("prompts"), list) else []
+        original_prompt_text = ""
+        for p in source_prompts:
+            if not isinstance(p, dict):
+                continue
+            candidate = str(p.get("text") or "").strip()
+            if candidate:
+                original_prompt_text = candidate
+                break
+        iterate_text = str(edit_instruction or "").strip()
+        resolved_blob_paths = [str(x).strip() for x in (source_blob_paths or []) if str(x).strip()]
+        source_artifacts_by_blob = self._resolve_source_artifacts_from_blob_paths(
+            project_id=source.project_id,
+            blob_paths=resolved_blob_paths,
+        )
+
+        qc_name = self._qc_prompt_name_for_edit(source)
+        iteration_number = max(1, int(source.revision or 1))
+        iteration_subfolder = self._qc_iteration_subfolder(
+            kind=str(source.kind or "artifact"),
+            qc_name=qc_name,
+            iteration_number=iteration_number,
+        )
+
+        new_artifact_id = new_id("art")
+        draft = edit_fn(
+            fmt=fmt,
+            ctx=fmt_ctx,
+            source_artifact=source_artifact_dict,
+            edit_instruction=iterate_text,
+            target_artifact_id=new_artifact_id,
+            source_blob_paths=resolved_blob_paths,
+        )
+        if not isinstance(draft, ArtifactDraft):
+            raise ValueError("Builder edit() must return ArtifactDraft")
+        draft_payload = draft.payload_json if isinstance(draft.payload_json, dict) else {}
+        iterated_prompt_text = self._extract_prompt_text(
+            draft_payload,
+            preferred_names=["iterate_prompt", "image_prompt", "video_prompt", "artifact_prompt"],
+        )
+        self._save_qc_format_prompt(
+            project_id=source.project_id,
+            kind=str(source.kind or "artifact"),
+            name=qc_name,
+            suffix=self.QC_PROMPT_SUFFIXES["edit_effective"],
+            text=iterated_prompt_text,
+            subfolder=iteration_subfolder,
+        )
+        self._save_qc_format_prompt(
+            project_id=source.project_id,
+            kind=str(source.kind or "artifact"),
+            name=qc_name,
+            suffix=self.QC_PROMPT_SUFFIXES["edit_original"],
+            text=original_prompt_text or "not available",
+            subfolder=iteration_subfolder,
+        )
+        self._save_qc_format_prompt(
+            project_id=source.project_id,
+            kind=str(source.kind or "artifact"),
+            name=qc_name,
+            suffix=self.QC_PROMPT_SUFFIXES["edit_instruction"],
+            text=iterate_text,
+            subfolder=iteration_subfolder,
+        )
+
+        siblings = self.artifacts.list_artifacts_by_format(source.project_id, fmt)
+        fallback_title = str(source.title or "").strip() or str(draft.title or "").strip() or "Artifact"
+        next_title, next_version = self._next_iterated_title_and_version(fallback_title, siblings)
+        next_revision = max([int(getattr(row, "revision", 0) or 0) for row in siblings] + [0]) + 1
+        payload = normalize_payload(draft.payload_json)
+        settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
+        settings["iteration_version"] = next_version
+        settings["source_blob_paths"] = resolved_blob_paths
+        settings["source_artifact_ids_by_blob_path"] = [
+            str(x.get("artifact_id") or "").strip()
+            for x in source_artifacts_by_blob
+            if str(x.get("artifact_id") or "").strip()
+        ]
+        payload["settings"] = settings
+        tags = self._merge_tags([], payload, draft.tags_json)
+        row = self.artifacts.create_artifact(
+            artifact_id=new_artifact_id,
+            project_id=source.project_id,
+            format=fmt,
+            title=next_title,
+            payload_json=payload,
+            tags_json=tags,
+            status=str(draft.status or "generated"),
+            revision=next_revision,
+            parent_artifact_id=source.artifact_id,
+        )
+        return {"status": "iterated", "artifact": self._to_entity_dict(row)}
+
     def generate(
         self,
         *,
@@ -479,6 +903,7 @@ class ArtifactPipelineOrchestrator:
             self.artifacts.delete_artifacts_for_project(project_id)
 
         persisted: list[dict[str, Any]] = []
+        generation_errors: list[dict[str, Any]] = []
         for fmt in ctx.requested_formats:
             builder = resolve_builder(fmt)
             if builder is None:
@@ -494,14 +919,37 @@ class ArtifactPipelineOrchestrator:
             )
             draft = builder.build(fmt=fmt, ctx=fmt_ctx)
             builder_kind = str(getattr(builder, "kind", "")).strip()
-            if builder_kind in {"image", "video", "gif"} and str(draft.status or "").strip().lower() != "generated":
-                # Do not persist failed/partial/simulated media artifacts.
+            draft_status = str(draft.status or "").strip().lower()
+            if builder_kind in {"image", "video", "gif"} and draft_status != "generated":
+                # Do not persist failed/partial/simulated media artifacts — but surface the error.
+                settings = draft.payload_json.get("settings") if isinstance(draft.payload_json, dict) else {}
+                error_msg = str((settings or {}).get("error_message") or "").strip() or f"{fmt} generation {draft_status}."
+                generation_errors.append({"format": fmt, "status": draft_status, "error": error_msg})
                 continue
-            persisted.append(self._persist_draft(project_id=project_id, draft=draft, revision_mode=opts.revision_mode))
+            saved = self._persist_draft(project_id=project_id, draft=draft, revision_mode=opts.revision_mode)
+            persisted.append(saved)
+            prompt_ref = self._save_build_prompts_for_draft(
+                project_id=project_id,
+                fmt=fmt,
+                draft=draft,
+                artifact_id=str(saved.get("artifact_id") or ""),
+                title=str(saved.get("title") or ""),
+            )
+            if prompt_ref:
+                updated = self.artifacts.update_artifact(
+                    str(saved.get("artifact_id") or ""),
+                    payload_json=draft.payload_json,
+                    status=draft.status,
+                )
+                if updated is not None:
+                    saved["payload_json"] = updated.payload_json or {}
 
-        return {
+        result: dict[str, Any] = {
             "project_id": project_id,
             "requested_formats": list(requested_formats),
             "options": asdict(opts),
             "artifacts": persisted,
         }
+        if generation_errors:
+            result["generation_errors"] = generation_errors
+        return result

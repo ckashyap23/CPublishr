@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_current_user_id, get_db
@@ -13,10 +13,11 @@ router = APIRouter()
 
 @router.get("/", response_model=ProjectListResponse)
 def list_projects(
+    limit: int | None = Query(default=None, ge=1, le=5000),
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> ProjectListResponse:
-    rows = ProjectRepository(db, user_id=user_id).list_projects()
+    rows = ProjectRepository(db, user_id=user_id).list_projects(limit=limit)
     return ProjectListResponse(
         projects=[
             ProjectEntity(

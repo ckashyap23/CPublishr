@@ -183,6 +183,8 @@ The UI supports:
 - artifact generation by kind/format multi-select
 - kind-scoped + format-scoped artifact style settings (`style_settings_by_kind`, `style_settings_by_format`)
 - image/video style include-master-context toggle (`include_master_content`)
+- image style fields: theme, subject, avoid, medium, texture, lighting, palette mode, mood, composition (focus/negative space), output fidelity
+- video style fields: theme, subject, avoid, mood, lighting, palette mode, output fidelity, camera motion (format-default or user-override), energy level (low/medium/high)
 - video format generation (`gif`, `reel`, `short_video`)
 - generated artifact view as per-artifact tabs
 - stored artifact retrieval view (shown as a separate artifacts sub-view)
@@ -196,3 +198,9 @@ The UI supports:
 - Full integration tests are currently Postgres/.env-dependent by design.
 - `backend/.env` contains secrets and is now ignored by `.gitignore`; do not commit real credentials.
 - For media artifacts (`image`, `video`, `gif`), orchestrator persists only drafts with `status="generated"`.
+
+---
+
+## Backend Update Reference
+
+Backend-side implemented changes (UI excluded) are tracked in [../BACKEND_CHANGES.md](../BACKEND_CHANGES.md).

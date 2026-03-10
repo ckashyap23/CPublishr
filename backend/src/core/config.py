@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     azure_artifacts_public_read: bool = False
     azure_artifacts_sas_ttl_minutes: int = 60
 
+    # Azure Blob storage for prompt audit logs
+    azure_prompt_logging_enabled: bool = True
+    azure_prompts_container: str = "qc-prompts"
+    azure_prompts_blob_prefix: str = ""
+
     # LinkedIn publishing (member/org post create via REST APIs)
     linkedin_access_token: str = ""
     linkedin_author_urn: str = ""  # e.g. urn:li:person:* or urn:li:organization:*

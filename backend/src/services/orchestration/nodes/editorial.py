@@ -1,6 +1,7 @@
 from src.services.llm.azure_openai import AzureOpenAIClient, parse_json_object
 from src.services.orchestration.contracts import NodeExecutionContext, NodeExecutionResult
 from src.services.orchestration.nodes.base import OrchestrationNode
+from src.services.storage.prompt_blob_storage import format_chat_prompt_text, save_prompt_text
 
 
 class EditorialNode(OrchestrationNode):
@@ -32,15 +33,25 @@ class EditorialNode(OrchestrationNode):
 
         if self.llm and self.llm.enabled:
             try:
+                system_prompt = "You are an editorial assistant. Return strict JSON only."
+                user_prompt = (
+                    "Return JSON with keys: updated_master_document (markdown), change_log (string[]). "
+                    "Edit the document according to feedback and actions.\n"
+                    f"feedback={feedback}\n"
+                    f"actions={change_log}\n"
+                    f"document=\n{base_doc}"
+                )
+                save_prompt_text(
+                    user_id=str(context.state.get("user_id") or context.input_payload.get("user_id") or "user"),
+                    project_id=str(context.project_id or context.input_payload.get("project_id") or "project"),
+                    section="master-content",
+                    name=f"editorial_v{current_version + 1}",
+                    suffix="editorial",
+                    text=format_chat_prompt_text(system_prompt=system_prompt, user_prompt=user_prompt),
+                )
                 raw = self.llm.chat(
-                    system_prompt="You are an editorial assistant. Return strict JSON only.",
-                    user_prompt=(
-                        "Return JSON with keys: updated_master_document (markdown), change_log (string[]). "
-                        "Edit the document according to feedback and actions.\n"
-                        f"feedback={feedback}\n"
-                        f"actions={change_log}\n"
-                        f"document=\n{base_doc}"
-                    ),
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
                     temperature=0.2,
                 )
                 parsed = parse_json_object(raw)

@@ -66,3 +66,9 @@ From `backend/`:
 
 - `.\.venv\Scripts\alembic.exe upgrade head`
 - `.\.venv\Scripts\alembic.exe revision -m "your_change_name"`
+
+---
+
+## Backend Update Reference
+
+Backend-side implemented changes (UI excluded) are tracked in [./BACKEND_CHANGES.md](./BACKEND_CHANGES.md).

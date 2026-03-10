@@ -10,6 +10,7 @@ from src.contracts.prd import ResearchTrendResponse
 from src.services.llm.azure_openai import AzureOpenAIClient, parse_json_object
 from src.services.orchestration.contracts import NodeExecutionContext, NodeExecutionResult
 from src.services.orchestration.nodes.base import OrchestrationNode
+from src.services.storage.prompt_blob_storage import format_chat_prompt_text, save_prompt_text
 
 
 DEFAULT_RESEARCH_PROMPTS: dict[str, str] = {
@@ -58,12 +59,31 @@ class ResearchTrendsNode(OrchestrationNode):
             "contrarian_angles": ["more agents is not always better"],
         }
 
-    def _llm_json(self, *, system_key: str, user_key: str, **kwargs: Any) -> dict[str, Any]:
+    def _llm_json(
+        self,
+        *,
+        system_key: str,
+        user_key: str,
+        user_id: str,
+        project_id: str,
+        prompt_suffix: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         if not self.llm or not self.llm.enabled:
             return {}
+        system_prompt = self.prompts[system_key]
+        user_prompt = self.prompts[user_key].format(**kwargs)
+        save_prompt_text(
+            user_id=user_id,
+            project_id=project_id,
+            section="master-content",
+            name="research",
+            suffix=prompt_suffix,
+            text=format_chat_prompt_text(system_prompt=system_prompt, user_prompt=user_prompt),
+        )
         raw = self.llm.chat(
-            system_prompt=self.prompts[system_key],
-            user_prompt=self.prompts[user_key].format(**kwargs),
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
             temperature=0.2,
         )
         return parse_json_object(raw)
@@ -94,12 +114,23 @@ class ResearchTrendsNode(OrchestrationNode):
             return []
 
     # 1) entity_analysis
-    def entity_analysis(self, *, topic_title: str, core_idea: str, user_content: str | None) -> dict[str, Any]:
+    def entity_analysis(
+        self,
+        *,
+        topic_title: str,
+        core_idea: str,
+        user_content: str | None,
+        user_id: str,
+        project_id: str,
+    ) -> dict[str, Any]:
         parsed = {}
         try:
             parsed = self._llm_json(
                 system_key="entity_analysis_system",
                 user_key="entity_analysis_user",
+                user_id=user_id,
+                project_id=project_id,
+                prompt_suffix="entity_analysis",
                 topic_title=topic_title,
                 core_idea=core_idea,
                 user_content=user_content or "",
@@ -146,12 +177,22 @@ class ResearchTrendsNode(OrchestrationNode):
         }
 
     # 3) tools
-    def tools(self, *, entity_info: dict[str, Any], web_data: dict[str, Any]) -> dict[str, Any]:
+    def tools(
+        self,
+        *,
+        entity_info: dict[str, Any],
+        web_data: dict[str, Any],
+        user_id: str,
+        project_id: str,
+    ) -> dict[str, Any]:
         parsed = {}
         try:
             parsed = self._llm_json(
                 system_key="tools_system",
                 user_key="tools_user",
+                user_id=user_id,
+                project_id=project_id,
+                prompt_suffix="tools",
                 subjects=json.dumps(entity_info.get("subjects") or []),
                 actions=json.dumps(entity_info.get("actions") or []),
                 context=str(entity_info.get("context") or ""),
@@ -176,12 +217,22 @@ class ResearchTrendsNode(OrchestrationNode):
         }
 
     # 4) Social_trends
-    def social_trends(self, *, topic: str, web_data: dict[str, Any]) -> dict[str, Any]:
+    def social_trends(
+        self,
+        *,
+        topic: str,
+        web_data: dict[str, Any],
+        user_id: str,
+        project_id: str,
+    ) -> dict[str, Any]:
         parsed = {}
         try:
             parsed = self._llm_json(
                 system_key="social_trends_system",
                 user_key="social_trends_user",
+                user_id=user_id,
+                project_id=project_id,
+                prompt_suffix="social_trends",
                 topic=topic,
                 search_snippets=json.dumps((web_data.get("snippets") or [])[:15]),
             )
@@ -213,6 +264,8 @@ class ResearchTrendsNode(OrchestrationNode):
         web_data: dict[str, Any],
         tools_data: dict[str, Any],
         social_data: dict[str, Any],
+        user_id: str,
+        project_id: str,
     ) -> dict[str, Any]:
         fallback = self._fallback_output(topic)
 
@@ -221,6 +274,9 @@ class ResearchTrendsNode(OrchestrationNode):
             parsed = self._llm_json(
                 system_key="research_output_system",
                 user_key="research_output_user",
+                user_id=user_id,
+                project_id=project_id,
+                prompt_suffix="synthesis",
                 topic=topic,
                 entity_analysis=json.dumps(entity_data),
                 web_search=json.dumps({"queries": web_data.get("queries"), "snippets": web_data.get("snippets", [])[:15]}),
@@ -245,6 +301,8 @@ class ResearchTrendsNode(OrchestrationNode):
 
     def run(self, context: NodeExecutionContext) -> NodeExecutionResult:
         b = context.state.get("context_bundle") or {}
+        user_id = str(context.state.get("user_id") or context.input_payload.get("user_id") or "user").strip() or "user"
+        project_id = str(context.project_id or context.input_payload.get("project_id") or "project").strip() or "project"
         topic_title = str(b.get("topic_title") or "AI Topic").strip()
         topic = str(b.get("normalized_topic") or topic_title or "ai").strip()
         core_idea = str(b.get("core_idea") or "").strip()
@@ -253,16 +311,24 @@ class ResearchTrendsNode(OrchestrationNode):
         fallback = self._fallback_output(topic)
 
         try:
-            entity_data = self.entity_analysis(topic_title=topic_title, core_idea=core_idea, user_content=user_content)
+            entity_data = self.entity_analysis(
+                topic_title=topic_title,
+                core_idea=core_idea,
+                user_content=user_content,
+                user_id=user_id,
+                project_id=project_id,
+            )
             web_data = self.web_search(entity_info=entity_data, topic=topic)
-            tools_data = self.tools(entity_info=entity_data, web_data=web_data)
-            social_data = self.social_trends(topic=topic, web_data=web_data)
+            tools_data = self.tools(entity_info=entity_data, web_data=web_data, user_id=user_id, project_id=project_id)
+            social_data = self.social_trends(topic=topic, web_data=web_data, user_id=user_id, project_id=project_id)
             output = self.research_output(
                 topic=topic,
                 entity_data=entity_data,
                 web_data=web_data,
                 tools_data=tools_data,
                 social_data=social_data,
+                user_id=user_id,
+                project_id=project_id,
             )
         except Exception:
             output = ResearchTrendResponse.model_validate(fallback).model_dump()

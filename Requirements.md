@@ -40,3 +40,9 @@ Dependency files:
 - Backend convenience install: `backend/requirements.txt`
 - React UI: `ui/react/package.json`
 - There is no root `requirements.txt` for backend/runtime dependencies.
+
+---
+
+## Backend Update Reference
+
+Backend-side implemented changes (UI excluded) are tracked in [./BACKEND_CHANGES.md](./BACKEND_CHANGES.md).
