@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -7,6 +9,7 @@ from src.core.logging import configure_logging
 from src.db.init_db import create_all
 
 configure_logging()
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.app_name)
 allowed_origins = [origin.strip() for origin in settings.cors_allow_origins.split(",") if origin.strip()]
@@ -22,9 +25,13 @@ app.include_router(api_router, prefix=settings.api_v1_prefix)
 
 @app.on_event("startup")
 def _startup() -> None:
-    # Uses DATABASE_URL from .env (Postgres in your setup).
     if settings.db_auto_create:
-        create_all()
+        try:
+            create_all()
+        except Exception as exc:
+            # Log but don't crash — DB may be temporarily unreachable at cold start.
+            # Tables will be created on the next request that triggers a DB connection.
+            logger.error("DB auto-create failed at startup (non-fatal): %s", exc)
 
 
 @app.get("/healthz")
