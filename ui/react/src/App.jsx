@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import publishrLogo from "./publishr_logo.png";
 
-const API_BASE_DEFAULT = "http://127.0.0.1:8010";
+const API_BASE_DEFAULT = "https://cpublishr.onrender.com";
 
 const TOPIC_TITLE_SUGGESTION = "Cats are better than dogs";
 const CORE_IDEA_SUGGESTION = "Cats are better than dogs";
