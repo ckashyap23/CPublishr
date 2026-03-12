@@ -14,6 +14,8 @@ from src.schemas.artifacts import (
     ArtifactEditResponse,
     ArtifactGenerationRequest,
     ArtifactGenerationResponse,
+    ArtifactSuggestRequest,
+    ArtifactSuggestResponse,
     ArtifactTitleUpdateRequest,
 )
 from src.services.orchestration.artifact_schema import formats_by_kind_map
@@ -170,6 +172,23 @@ def edit_artifact(
         logger.exception("Artifact edit failed for artifact_id=%s mode=%s", payload.artifact_id, payload.mode)
         raise HTTPException(status_code=500, detail=f"Artifact edit failed: {exc}") from exc
     return ArtifactEditResponse.model_validate(out)
+
+
+@router.post("/suggest", response_model=ArtifactSuggestResponse)
+def suggest_artifact_styles(
+    payload: ArtifactSuggestRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> ArtifactSuggestResponse:
+    from src.services.orchestration.artifacts.artifact_suggestion import ArtifactSuggestionService
+
+    svc = ArtifactSuggestionService(db, user_id=user_id)
+    try:
+        suggestions = svc.suggest(project_id=payload.project_id, formats=payload.formats)
+    except Exception as exc:
+        logger.exception("Artifact style suggestion failed for project_id=%s", payload.project_id)
+        raise HTTPException(status_code=500, detail=f"Suggestion failed: {exc}") from exc
+    return ArtifactSuggestResponse(suggestions=suggestions)
 
 
 @router.get("/{project_id}", response_model=ArtifactListResponse)

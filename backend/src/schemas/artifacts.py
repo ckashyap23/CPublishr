@@ -39,3 +39,12 @@ class ArtifactEditResponse(BaseModel):
     status: str
     artifact: ArtifactEntity | None = None
     detail: str | None = None
+
+
+class ArtifactSuggestRequest(BaseModel):
+    project_id: str
+    formats: list[str] = Field(default_factory=list)
+
+
+class ArtifactSuggestResponse(BaseModel):
+    suggestions: dict[str, dict] = Field(default_factory=dict)

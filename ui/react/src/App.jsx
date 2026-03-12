@@ -462,6 +462,8 @@ export default function App() {
   const [artifactImageAvoidInput, setArtifactImageAvoidInput] = useState("");
   const [artifactVideoStyle, setArtifactVideoStyle] = useState(() => makeDefaultVideoStyleSettings());
   const [artifactVideoAvoidInput, setArtifactVideoAvoidInput] = useState("");
+  const [artifactSuggestions, setArtifactSuggestions] = useState(null); // null = not loaded, {} = loaded (may be empty)
+  const [artifactSuggestionsLoading, setArtifactSuggestionsLoading] = useState(false);
   const [artifactStyleKindPanel, setArtifactStyleKindPanel] = useState("text");
   const [publishPlatforms, setPublishPlatforms] = useState([]);
   const [isPublishPlatformsLoading, setIsPublishPlatformsLoading] = useState(false);
@@ -658,6 +660,15 @@ export default function App() {
     if (!selectedStoredFormat) return [];
     return storedArtifacts.filter((a) => a?.format === selectedStoredFormat);
   }, [storedArtifacts, selectedStoredFormat]);
+  const storedArtifactCountsByFormat = useMemo(() => {
+    const counts = {};
+    for (const artifact of Array.isArray(storedArtifacts) ? storedArtifacts : []) {
+      const fmt = String(artifact?.format || "").trim();
+      if (!fmt) continue;
+      counts[fmt] = (counts[fmt] || 0) + 1;
+    }
+    return counts;
+  }, [storedArtifacts]);
   const selectedStoredArtifact = filteredStoredArtifacts[selectedStoredArtifactTab] || null;
   const isArtifactEditActive = artifactEditMode !== "none";
   const approvedActiveVoiceProfileOptions = useMemo(() => {
@@ -673,6 +684,11 @@ export default function App() {
         };
       });
   }, [vpCollections]);
+  const projectHasSavedVoiceProfileOption = useMemo(() => {
+    const currentVoiceProfileId = String(form.voice_profile_id || "").trim();
+    if (!currentVoiceProfileId) return false;
+    return approvedActiveVoiceProfileOptions.some((opt) => opt.value === currentVoiceProfileId);
+  }, [approvedActiveVoiceProfileOptions, form.voice_profile_id]);
   const projectToneBase = useMemo(() => toneBaseFromProjectTone(form.tone_preference), [form.tone_preference]);
   const artifactSelectedFormatCards = useMemo(
     () => selectedArtifactFormats.map((fmt) => artifactFormatMeta(fmt)),
@@ -741,8 +757,7 @@ export default function App() {
     const coreIdea = String(form.core_idea || "").trim();
     const targetAudience = String(form.target_audience_segment || "").trim();
     const tonePreference = String(form.tone_preference || "").trim();
-    const voiceProfileId = String(form.voice_profile_id || "").trim();
-    return !!(topicTitle && coreIdea && targetAudience && tonePreference && voiceProfileId);
+    return !!(topicTitle && coreIdea && targetAudience && tonePreference);
   }, [form]);
   const canGenerateArtifactsNow = useMemo(() => {
     if (!selectedArtifactFormats.length) return false;
@@ -803,12 +818,7 @@ export default function App() {
       }
       return null;
     })();
-    const revisionLabel = artifact?.revision != null ? `v${artifact.revision}` : null;
-    const psBits = [
-      revisionLabel,
-      assetRef ? `File/URL: ${assetRef}` : null,
-      qcPromptRef ? `QC Prompt URL: ${qcPromptRef}` : null,
-    ].filter(Boolean);
+    const assetDetails = assetRef ? `File/URL: ${assetRef}` : null;
 
     if (["image_generation", "post_image", "thumbnail", "banner", "cover"].includes(fmt)) {
       const imageAsset = assets.find((a) => String(a?.mime_type || "").startsWith("image/")) || assets[0] || null;
@@ -825,7 +835,7 @@ export default function App() {
           {imageAsset ? (
             <p className="note">Format: {imageAsset.format || "-"}{imageAsset.path ? ` | Path: ${imageAsset.path}` : ""}</p>
           ) : null}
-          {psBits.length ? <p className="note artifact-ps-note">P.S. {psBits.join(" | ")}</p> : null}
+          {assetDetails ? <p className="note artifact-ps-note">{assetDetails}</p> : null}
         </div>
       );
     }
@@ -874,7 +884,7 @@ export default function App() {
             </>
           ) : null}
 
-          {psBits.length ? <p className="note artifact-ps-note">P.S. {psBits.join(" | ")}</p> : null}
+          {assetDetails ? <p className="note artifact-ps-note">{assetDetails}</p> : null}
         </div>
       );
     }
@@ -893,7 +903,7 @@ export default function App() {
               </button>
             ))}
           </div>
-          {psBits.length ? <p className="note artifact-ps-note">P.S. {psBits.join(" | ")}</p> : null}
+          {assetDetails ? <p className="note artifact-ps-note">{assetDetails}</p> : null}
         </div>
       );
     }
@@ -921,7 +931,7 @@ export default function App() {
               {topicTags.map((tag) => <span key={tag} className="artifact-hashtag">{tag}</span>)}
             </div>
           ) : null}
-          {psBits.length ? <p className="note artifact-ps-note">P.S. {psBits.join(" | ")}</p> : null}
+          {assetDetails ? <p className="note artifact-ps-note">{assetDetails}</p> : null}
         </div>
       );
     }
@@ -935,7 +945,7 @@ export default function App() {
               {topicTags.map((tag) => <span key={tag} className="artifact-hashtag">{tag}</span>)}
             </div>
           ) : null}
-          {psBits.length ? <p className="note artifact-ps-note">P.S. {psBits.join(" | ")}</p> : null}
+          {assetDetails ? <p className="note artifact-ps-note">{assetDetails}</p> : null}
         </div>
       );
     }
@@ -950,7 +960,7 @@ export default function App() {
               {socialTags.map((tag) => <span key={tag} className="artifact-hashtag">{tag}</span>)}
             </div>
           ) : null}
-          {psBits.length ? <p className="note artifact-ps-note">P.S. {psBits.join(" | ")}</p> : null}
+          {assetDetails ? <p className="note artifact-ps-note">{assetDetails}</p> : null}
         </div>
       );
     }
@@ -1000,7 +1010,7 @@ async function refreshVersions(projectId, preferredVersion) {
       const versionsList = await refreshVersions(normalizedProjectId);
       setPage("editorial");
       if (Array.isArray(versionsList) && versionsList.length) {
-        setMessage("Editorial content loaded.");
+        setMessage("");
       } else {
         setMessage(`No saved versions found for project "${normalizedProjectId}".`);
       }
@@ -1076,6 +1086,7 @@ async function refreshVersions(projectId, preferredVersion) {
       setCurrentUser(out?.user || null);
       setAuthForm((prev) => ({ ...prev, password: "" }));
       setMessage("");
+      setPage("projects");
     } catch (e) {
       setError(e.message || String(e));
     } finally {
@@ -1151,13 +1162,6 @@ async function refreshVersions(projectId, preferredVersion) {
     const hasPreferred = preferredCollectionId && rows.some((x) => x.voice_profile_id === preferredCollectionId);
     const nextCollectionId = hasPreferred ? preferredCollectionId : rows[0]?.voice_profile_id || "";
     setVpSelectedCollectionId(nextCollectionId);
-
-    const activeApproved = rows.find(
-      (x) => x?.active_version && String(x.active_version.generation_status || "").toLowerCase() === "approved"
-    );
-    if (activeApproved) {
-      setForm((prev) => ({ ...prev, voice_profile_id: activeApproved.voice_profile_id }));
-    }
   }
 
   async function loadVpCollectionDetail(voiceProfileId) {
@@ -1781,6 +1785,60 @@ async function refreshVersions(projectId, preferredVersion) {
     };
   }
 
+  async function fetchAndApplyArtifactSuggestions(formats) {
+    const projectId = String(form.project_id || "").trim();
+    const mediaFormats = formats.filter((f) =>
+      ["post_image", "thumbnail", "banner", "cover", "gif", "reel", "short_video"].includes(f)
+    );
+    if (!projectId || !mediaFormats.length) return;
+    setArtifactSuggestionsLoading(true);
+    setArtifactSuggestions(null);
+    try {
+      const out = await request("POST", "/api/v1/artifacts/suggest", {
+        project_id: projectId,
+        formats: mediaFormats,
+      });
+      const suggestions = out?.suggestions || {};
+      setArtifactSuggestions(suggestions);
+      // Pre-fill image style if theme/subject are still empty (user hasn't typed anything)
+      if (suggestions.image && typeof suggestions.image === "object") {
+        setArtifactImageStyle((prev) => {
+          const s = suggestions.image;
+          return {
+            ...prev,
+            theme: prev.theme || s.theme || prev.theme,
+            subject_prompt: prev.subject_prompt || s.subject_prompt || prev.subject_prompt,
+            mood: s.mood || prev.mood,
+            medium: s.medium || prev.medium,
+            texture: s.texture || prev.texture,
+            palette_mode: s.palette_mode || prev.palette_mode,
+            focus_negative_space: s.focus_negative_space || prev.focus_negative_space,
+          };
+        });
+      }
+      // Pre-fill video style if theme/subject are still empty
+      if (suggestions.video && typeof suggestions.video === "object") {
+        setArtifactVideoStyle((prev) => {
+          const s = suggestions.video;
+          return {
+            ...prev,
+            theme: prev.theme || s.theme || prev.theme,
+            subject_prompt: prev.subject_prompt || s.subject_prompt || prev.subject_prompt,
+            mood: s.mood || prev.mood,
+            lighting: s.lighting || prev.lighting,
+            palette_mode: s.palette_mode || prev.palette_mode,
+          };
+        });
+      }
+    } catch (err) {
+      // Suggestions are best-effort; log and silently continue
+      console.warn("Artifact style suggestion failed:", err?.message || err);
+      setArtifactSuggestions({});
+    } finally {
+      setArtifactSuggestionsLoading(false);
+    }
+  }
+
   function toggleArtifactFormat(format) {
     const current = new Set(selectedArtifactFormats);
     if (current.has(format)) current.delete(format);
@@ -2061,6 +2119,10 @@ async function refreshVersions(projectId, preferredVersion) {
     }
   }
 
+  function onCloseEditorialPreview() {
+    setFeedbackPreviewContent("");
+  }
+
   async function onGenerateArtifacts() {
     if (!selectedArtifactFormats.length) {
       setError("Select at least one artifact format.");
@@ -2151,12 +2213,14 @@ async function refreshVersions(projectId, preferredVersion) {
       const out = await request("GET", `/api/v1/artifacts/${normalizedProjectId}`);
       if (requestSeq !== storedArtifactsCheckSeqRef.current) return;
       const items = Array.isArray(out?.artifacts) ? out.artifacts : [];
+      setStoredArtifacts(items);
       setHasStoredArtifactsForProject(items.length > 0);
       setStoredArtifactFormatsForProject(
         uniqueStrings(items.map((a) => String(a?.format || "").trim()).filter(Boolean))
       );
     } catch {
       if (requestSeq !== storedArtifactsCheckSeqRef.current) return;
+      setStoredArtifacts([]);
       setHasStoredArtifactsForProject(false);
       setStoredArtifactFormatsForProject([]);
     } finally {
@@ -2722,6 +2786,12 @@ async function refreshVersions(projectId, preferredVersion) {
   }, [artifactStyleSource, artifactStyleVoiceProfileId, authToken]);
 
   useEffect(() => {
+    if (projectHasSavedVoiceProfileOption) return;
+    setArtifactStyleSource("manual");
+    setArtifactStyleVoiceProfileDetail(null);
+  }, [projectHasSavedVoiceProfileOption]);
+
+  useEffect(() => {
     if (!selectedVersion) return;
     setWorkingContent(selectedVersion.content || "");
     setFeedbackPreviewContent("");
@@ -2821,14 +2891,6 @@ async function refreshVersions(projectId, preferredVersion) {
   }, [vpSelectedVersionId, authToken]);
 
   useEffect(() => {
-    if (!approvedActiveVoiceProfileOptions.length) return;
-    const hasCurrent = approvedActiveVoiceProfileOptions.some((x) => x.value === form.voice_profile_id);
-    if (!hasCurrent) {
-      setForm((prev) => ({ ...prev, voice_profile_id: approvedActiveVoiceProfileOptions[0].value }));
-    }
-  }, [approvedActiveVoiceProfileOptions]);
-
-  useEffect(() => {
     if (!platformTargets.length) {
       setForm((prev) => ({ ...prev, distribution_targets: [] }));
       setVpCreateForm((prev) => ({ ...prev, platforms: [] }));
@@ -2881,9 +2943,6 @@ async function refreshVersions(projectId, preferredVersion) {
                       Back to Workflow
                     </button>
                   ) : null}
-                  {page !== "settings" ? (
-                    <button className="secondary" disabled={busy} onClick={() => setPage("settings")}>Settings</button>
-                  ) : null}
                   <button className="secondary" disabled={busy} onClick={onLogout}>Logout</button>
                 </div>
                 <span className="note top-banner-user">User ID: {currentUser?.user_id || "-"}</span>
@@ -2921,16 +2980,11 @@ async function refreshVersions(projectId, preferredVersion) {
           </div>
         ) : null}
 
-        {(showWorkflowRegion || topBannerMessage || error || isGenerating || isArtifactGenerating || isStoredArtifactsLoading) ? (
+        {(showWorkflowRegion || error || isGenerating || isArtifactGenerating || isStoredArtifactsLoading) ? (
           <div className="card">
             {showWorkflowRegion ? (
               <>
-                <p className="note">Lightweight React interface for Node 0-3 flow with editorial actions.</p>
                 <div className="grid two">
-          <div>
-            <label>Backend Base URL</label>
-            <input value={apiBaseUrl} onChange={(e) => setApiBaseUrl(e.target.value)} />
-          </div>
           {!isAuthenticated ? (
             <>
               <div>
@@ -2964,16 +3018,16 @@ async function refreshVersions(projectId, preferredVersion) {
           ) : (
             <>
               <div>
-                <label>User</label>
-                <p className="note">{currentUser?.user_id || "-"} ({currentUser?.email || "-"})</p>
-              </div>
-              <div>
                 <label>Project ID</label>
-                <input
-                  value={form.project_id}
-                  onChange={(e) => onNewProjectIdChange(e.target.value)}
-                  placeholder="Enter a new project ID"
-                />
+                {isCreatingNewProject ? (
+                  <input
+                    value={form.project_id}
+                    onChange={(e) => onNewProjectIdChange(e.target.value)}
+                    placeholder="Enter a new project ID"
+                  />
+                ) : (
+                  <div className="project-id-inline">{form.project_id || "-"}</div>
+                )}
                 {page === "setup" && isProjectsLoading ? (
                   <p className="note" style={{ marginTop: "6px" }}>Loading your projects...</p>
                 ) : null}
@@ -2993,15 +3047,43 @@ async function refreshVersions(projectId, preferredVersion) {
                   <p className="note" style={{ marginTop: "6px" }}>Checking project data...</p>
                 ) : null}
               </div>
-              <div>
-                <label>Workflow Pages</label>
-                <div className="row">
+              <div className="workflow-steps-block">
+                <div className="workflow-stepper">
                   {!isExistingProjectFlow ? (
-                    <button className={page === "setup" ? "primary" : "secondary"} disabled={busy} onClick={() => setPage("setup")}>Setup</button>
+                    <>
+                      <button
+                        className={`workflow-step ${page === "setup" ? "workflow-step-active" : ""}`}
+                        disabled={busy}
+                        onClick={() => setPage("setup")}
+                      >
+                        <span className="workflow-step-label">Setup</span>
+                      </button>
+                      <span className="workflow-step-arrow">›</span>
+                    </>
                   ) : null}
-                  <button className={page === "editorial" ? "primary" : "secondary"} disabled={busy} onClick={onOpenEditorialPage}>Editorial</button>
-                  <button className={page === "artifacts" ? "primary" : "secondary"} disabled={busy} onClick={() => setPage("artifacts")}>Artifacts</button>
-                  <button className={page === "publish" ? "primary" : "secondary"} disabled={busy} onClick={() => setPage("publish")}>Publish</button>
+                  <button
+                    className={`workflow-step ${page === "editorial" ? "workflow-step-active" : ""}`}
+                    disabled={busy}
+                    onClick={onOpenEditorialPage}
+                  >
+                    <span className="workflow-step-label">Editorial</span>
+                  </button>
+                  <span className="workflow-step-arrow">›</span>
+                  <button
+                    className={`workflow-step ${page === "artifacts" ? "workflow-step-active" : ""}`}
+                    disabled={busy}
+                    onClick={() => setPage("artifacts")}
+                  >
+                    <span className="workflow-step-label">Artifacts</span>
+                  </button>
+                  <span className="workflow-step-arrow">›</span>
+                  <button
+                    className={`workflow-step ${page === "publish" ? "workflow-step-active" : ""}`}
+                    disabled={busy}
+                    onClick={() => setPage("publish")}
+                  >
+                    <span className="workflow-step-label">Publish</span>
+                  </button>
                 </div>
               </div>
               </>
@@ -3009,7 +3091,6 @@ async function refreshVersions(projectId, preferredVersion) {
             </div>
             </>
           ) : null}
-            {topBannerMessage ? <div className="status ok">{topBannerMessage}</div> : null}
             {error ? <div className="status warn">{error}</div> : null}
             {(isGenerating || isArtifactGenerating || isStoredArtifactsLoading) ? (
               <div style={{ marginTop: "10px" }}>
@@ -3067,17 +3148,7 @@ async function refreshVersions(projectId, preferredVersion) {
                 {AUDIENCE_OPTIONS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
               </select>
             </div>
-            <div>
-              <LabelWithTooltip
-                text="Target Audience Notes"
-                tooltip="Optional. Add specifics about your audience (role, industry, constraints). The more specific this is, the more accurate the output will be."
-              />
-              <input
-                value={form.target_audience_notes}
-                onChange={(e) => setForm({ ...form, target_audience_notes: e.target.value })}
-                placeholder="Optional specifics for audience context"
-              />
-            </div>
+            {/* Target Audience Notes hidden from setup screen */}
             <div>
               <LabelWithTooltip
                 text="Audience Familiarity"
@@ -3135,43 +3206,6 @@ async function refreshVersions(projectId, preferredVersion) {
             </div>
             <div style={{ gridColumn: "1 / -1" }}>
               <LabelWithTooltip
-                text="User Content"
-                tooltip="Any raw notes you already have - bullets, a rough draft, links, or context. The more specific this is, the more accurate the output will be."
-              />
-              <textarea
-                ref={userContentTextareaRef}
-                value={form.user_content || ""}
-                onFocus={(e) => autoResizeTextarea(e.target)}
-                onChange={(e) => {
-                  setForm({ ...form, user_content: e.target.value });
-                  autoResizeTextarea(e.target);
-                }}
-                placeholder={USER_CONTENT_SUGGESTION}
-              />
-            </div>
-            <div>
-              <LabelWithTooltip
-                text="Voice Profile"
-                required
-                tooltip="Select from approved active voice profiles by name. The mapped voice_profile_id is sent to backend."
-              />
-              <select
-                value={form.voice_profile_id || ""}
-                onChange={(e) => setForm({ ...form, voice_profile_id: e.target.value })}
-              >
-                <option value="">Select approved active voice profile</option>
-                {approvedActiveVoiceProfileOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-              {form.voice_profile_id ? (
-                <p className="note" style={{ marginTop: "6px" }}>Selected voice_profile_id: {form.voice_profile_id}</p>
-              ) : (
-                <p className="note" style={{ marginTop: "6px" }}>No approved active voice profile selected.</p>
-              )}
-            </div>
-            <div>
-              <LabelWithTooltip
                 text="Distribution Targets"
                 tooltip="Where you might publish this. This doesn’t change the core idea—just helps us prepare formats that fit those platforms later."
               />
@@ -3189,6 +3223,20 @@ async function refreshVersions(projectId, preferredVersion) {
                 ))}
               </div>
             </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <LabelWithTooltip
+                text="User Content"
+                tooltip="Any raw notes you already have - bullets, a rough draft, links, or context. The more specific this is, the more accurate the output will be."
+              />
+              <textarea
+                ref={userContentTextareaRef}
+                className="user-content-textarea"
+                value={form.user_content || ""}
+                onChange={(e) => setForm({ ...form, user_content: e.target.value })}
+                placeholder={USER_CONTENT_SUGGESTION}
+              />
+            </div>
+            {/* Voice Profile selection hidden from setup screen — managed via Settings */}
           </div>
           <div className="row" style={{ marginTop: "12px" }}>
             <button
@@ -3418,8 +3466,8 @@ async function refreshVersions(projectId, preferredVersion) {
       {isAuthenticated && page === "editorial" && (
         <div className="card">
           <h2>Editorial Workspace</h2>
-          <div className="grid two">
-            <div>
+          <div className="editorial-header-grid">
+            <div className="editorial-version-picker">
               <label>Select Content Version</label>
               <select value={selectedVersionNumber || ""} onChange={(e) => applySelection(e.target.value)}>
                 <option value="" disabled>Select version</option>
@@ -3430,10 +3478,19 @@ async function refreshVersions(projectId, preferredVersion) {
                 ))}
               </select>
             </div>
-            <div className="note row" style={{ gap: "16px", alignItems: "center", flexWrap: "wrap" }}>
-              <span>Selected kind: <strong>{selectedVersion?.version_kind || "-"}</strong></span>
-              <span>Variant label: <strong>{selectedVersion?.variant_label || "-"}</strong></span>
-              <span>Stage: <strong>{selectedVersion?.version_stage || "-"}</strong></span>
+            <div className="editorial-meta-grid">
+              <div className="editorial-meta-item">
+                <div className="editorial-meta-label">Selected kind</div>
+                <div className="editorial-meta-value">{selectedVersion?.version_kind || "-"}</div>
+              </div>
+              <div className="editorial-meta-item">
+                <div className="editorial-meta-label">Variant label</div>
+                <div className="editorial-meta-value">{selectedVersion?.variant_label || "-"}</div>
+              </div>
+              <div className="editorial-meta-item">
+                <div className="editorial-meta-label">Stage</div>
+                <div className="editorial-meta-value">{selectedVersion?.version_stage || "-"}</div>
+              </div>
             </div>
           </div>
 
@@ -3453,7 +3510,7 @@ async function refreshVersions(projectId, preferredVersion) {
                           autoResizeTextarea(e.target);
                         }}
                       />
-                      <div className="row" style={{ marginTop: "8px" }}>
+                      <div className="row editorial-action-row" style={{ marginTop: "8px" }}>
                         <button className="secondary" disabled={busy} onClick={onCancelEditorialEdit}>Cancel</button>
                         <button className="secondary" disabled={busy} onClick={onSaveInline}>Save</button>
                         <button className="primary" disabled={busy} onClick={onFinalizeFromInline}>Finalize Content</button>
@@ -3463,7 +3520,7 @@ async function refreshVersions(projectId, preferredVersion) {
                     <>
                       <pre className="content editorial-content-block">{selectedVersion.content || ""}</pre>
                       {editorMode === "none" ? (
-                        <div className="row" style={{ marginTop: "8px" }}>
+                        <div className="row editorial-action-row" style={{ marginTop: "8px" }}>
                           <button
                             className="secondary"
                             disabled={busy}
@@ -3492,36 +3549,40 @@ async function refreshVersions(projectId, preferredVersion) {
 
                       {editorMode === "iterate" && (
                         <>
-                          <h3 style={{ marginTop: "16px" }}>Feedback Editor</h3>
-                          <textarea
-                            ref={editorialFeedbackTextareaRef}
-                            className="editorial-edit-textarea"
-                            value={feedbackText}
-                            onChange={(e) => {
-                              setFeedbackText(e.target.value);
-                              autoResizeTextarea(e.target);
-                            }}
-                          />
-                          <div className="row" style={{ marginTop: "8px" }}>
-                            <button className="secondary" disabled={busy || isPreviewing} onClick={onCancelEditorialEdit}>Cancel</button>
-                            <button className="secondary" disabled={busy} onClick={onFeedbackPreview}>Preview</button>
-                            {isPreviewing ? (
-                              <div className="row" aria-live="polite">
-                                <div className="spinner spinner-inline" />
-                                <span className="note">Generating preview...</span>
+                          {!feedbackPreviewContent ? (
+                            <>
+                              <h3 style={{ marginTop: "16px" }}>Feedback Editor</h3>
+                              <textarea
+                                ref={editorialFeedbackTextareaRef}
+                                className="editorial-edit-textarea"
+                                value={feedbackText}
+                                onChange={(e) => {
+                                  setFeedbackText(e.target.value);
+                                  autoResizeTextarea(e.target);
+                                }}
+                              />
+                              <div className="row editorial-action-row" style={{ marginTop: "8px" }}>
+                                <button className="secondary" disabled={busy || isPreviewing} onClick={onCancelEditorialEdit}>Cancel</button>
+                                <button className="secondary" disabled={busy} onClick={onFeedbackPreview}>Preview</button>
+                                {isPreviewing ? (
+                                  <div className="row" aria-live="polite">
+                                    <div className="spinner spinner-inline" />
+                                    <span className="note">Generating preview...</span>
+                                  </div>
+                                ) : null}
                               </div>
-                            ) : null}
-                          </div>
-                          {feedbackPreviewContent ? (
+                            </>
+                          ) : (
                             <>
                               <h3 style={{ marginTop: "16px" }}>Preview Content</h3>
                               <pre className="content editorial-content-block">{feedbackPreviewContent}</pre>
-                              <div className="row" style={{ marginTop: "8px" }}>
+                              <div className="row editorial-action-row" style={{ marginTop: "8px" }}>
+                                <button className="secondary" disabled={busy} onClick={onCloseEditorialPreview}>Cancel</button>
                                 <button className="secondary" disabled={busy} onClick={onSavePreview}>Save</button>
                                 <button className="primary" disabled={busy} onClick={onFinalizeFromPreview}>Finalize Content</button>
                               </div>
                             </>
-                          ) : null}
+                          )}
                         </>
                       )}
                     </>
@@ -3529,7 +3590,7 @@ async function refreshVersions(projectId, preferredVersion) {
                 </div>
 
                 {editorMode === "none" ? (
-                <div>
+                <div className="editorial-keywords-panel">
                   <h3>Keywords</h3>
                   <div className="row">
                     {(selectedVersion.keywords || []).map((kw) => (
@@ -3539,7 +3600,7 @@ async function refreshVersions(projectId, preferredVersion) {
                       </span>
                     ))}
                   </div>
-                  <div className="row" style={{ marginTop: "8px" }}>
+                  <div className="row editorial-action-row" style={{ marginTop: "8px" }}>
                     <input
                       value={keywordsInput}
                       onChange={(e) => setKeywordsInput(e.target.value)}
@@ -3609,17 +3670,25 @@ async function refreshVersions(projectId, preferredVersion) {
                   type="button"
                   className={artifactGenerateStep === "formats" ? "primary" : "secondary"}
                   disabled={busy}
-                  onClick={() => setArtifactGenerateStep("formats")}
+                  onClick={() => {
+                    setArtifactGenerateStep("formats");
+                    setArtifactSuggestions(null);
+                  }}
                 >
-                  1. Formats
+                  Formats
                 </button>
                 <button
                   type="button"
                   className={artifactGenerateStep === "style" ? "primary" : "secondary"}
                   disabled={busy || !selectedArtifactFormats.length}
-                  onClick={() => setArtifactGenerateStep("style")}
+                  onClick={() => {
+                    if (artifactGenerateStep !== "style") {
+                      setArtifactGenerateStep("style");
+                      fetchAndApplyArtifactSuggestions(selectedArtifactFormats);
+                    }
+                  }}
                 >
-                  2. Style
+                  Style
                 </button>
               </div>
 
@@ -3629,9 +3698,6 @@ async function refreshVersions(projectId, preferredVersion) {
                     const formats = orderArtifactFormats(kind, artifactFormatsByKind[kind] || []);
                     if (!formats.length) return null;
                     const kindUnavailable = kind === "gif" || kind === "video";
-                    const selectedCount = formats.filter((fmt) => selectedArtifactFormats.includes(fmt)).length;
-                    const allSelected = formats.length > 0 && selectedCount === formats.length;
-                    const showBulkToggle = formats.length > 3 && !kindUnavailable;
                     return (
                       <div key={`wizard-kind-${kind}`} style={{ marginBottom: "22px", opacity: kindUnavailable ? 0.45 : 1 }}>
                         <div className="row" style={{ marginBottom: "10px" }}>
@@ -3639,28 +3705,17 @@ async function refreshVersions(projectId, preferredVersion) {
                           {kindUnavailable ? (
                             <span className="note" style={{ color: "#c0392b", fontStyle: "italic" }}>temporarily unavailable</span>
                           ) : null}
-                          {showBulkToggle ? (
-                            <button
-                              type="button"
-                              className="secondary"
-                              disabled={busy}
-                              onClick={() => toggleArtifactKind(kind)}
-                            >
-                              {allSelected ? "Unselect All" : "Select All"}
-                            </button>
-                          ) : null}
-                          {!kindUnavailable ? <span className="note">{selectedCount}/{formats.length} selected</span> : null}
                         </div>
                         <div className="artifact-card-grid">
                           {formats.map((fmt) => {
                             const card = artifactFormatMeta(fmt);
                             const isSelected = selectedArtifactFormats.includes(card.key);
-                            const exists = storedArtifactFormatsForProject.includes(card.key);
+                            const existingCount = storedArtifactCountsByFormat[card.key] || 0;
                             return (
                               <button
                                 key={card.key}
                                 type="button"
-                                className={`artifact-select-card ${exists ? "artifact-select-card-existing" : "artifact-select-card-missing"} ${isSelected ? "artifact-select-card-selected" : ""}`}
+                                className={`artifact-select-card ${isSelected ? "artifact-select-card-selected" : ""}`}
                                 onClick={() => !kindUnavailable && toggleArtifactFormat(card.key)}
                                 disabled={busy || kindUnavailable}
                                 title={kindUnavailable ? "Video generation is temporarily unavailable" : undefined}
@@ -3668,6 +3723,7 @@ async function refreshVersions(projectId, preferredVersion) {
                               >
                                 <div className="artifact-select-card-title">{card.title}</div>
                                 {card.description ? <div className="artifact-select-card-desc">{card.description}</div> : null}
+                                {existingCount > 0 ? <div className="artifact-select-card-count">{existingCount} existing</div> : null}
                               </button>
                             );
                           })}
@@ -3676,13 +3732,15 @@ async function refreshVersions(projectId, preferredVersion) {
                     );
                   })}
                   <div className="row" style={{ marginTop: "12px" }}>
-                    <span className="note">{selectedArtifactFormats.length} selected</span>
                     {selectedArtifactFormats.length ? (
                       <button
                         type="button"
                         className="primary"
                         disabled={busy}
-                        onClick={() => setArtifactGenerateStep("style")}
+                        onClick={() => {
+                          setArtifactGenerateStep("style");
+                          fetchAndApplyArtifactSuggestions(selectedArtifactFormats);
+                        }}
                       >
                         Next: Style
                       </button>
@@ -3719,30 +3777,32 @@ async function refreshVersions(projectId, preferredVersion) {
                   <>
                   <div className="card" style={{ marginTop: "12px", marginBottom: 0 }}>
                     <h3 style={{ marginTop: 0 }}>Style Source</h3>
-                    <div className="row">
-                      <label className="tag">
-                        <input
-                          type="radio"
-                          name="artifact-style-source"
-                          checked={artifactStyleSource === "voice_profile"}
-                          onChange={() => setArtifactStyleSource("voice_profile")}
-                          style={{ width: "auto", marginRight: "6px" }}
-                        />
-                        Use saved Voice Profile
-                      </label>
-                      <label className="tag">
-                        <input
-                          type="radio"
-                          name="artifact-style-source"
-                          checked={artifactStyleSource === "manual"}
-                          onChange={() => setArtifactStyleSource("manual")}
-                          style={{ width: "auto", marginRight: "6px" }}
-                        />
-                        Enter style manually
-                      </label>
-                    </div>
+                    {projectHasSavedVoiceProfileOption ? (
+                      <div className="row">
+                        <label className="tag">
+                          <input
+                            type="radio"
+                            name="artifact-style-source"
+                            checked={artifactStyleSource === "voice_profile"}
+                            onChange={() => setArtifactStyleSource("voice_profile")}
+                            style={{ width: "auto", marginRight: "6px" }}
+                          />
+                          Use saved Voice Profile
+                        </label>
+                        <label className="tag">
+                          <input
+                            type="radio"
+                            name="artifact-style-source"
+                            checked={artifactStyleSource === "manual"}
+                            onChange={() => setArtifactStyleSource("manual")}
+                            style={{ width: "auto", marginRight: "6px" }}
+                          />
+                          Enter style manually
+                        </label>
+                      </div>
+                    ) : null}
 
-                    {artifactStyleSource === "voice_profile" ? (
+                    {projectHasSavedVoiceProfileOption && artifactStyleSource === "voice_profile" ? (
                       <>
                         <div style={{ marginTop: "10px" }}>
                           <label>voice_profile_id<span className="publish-required-mark"> *</span></label>
@@ -3804,7 +3864,6 @@ async function refreshVersions(projectId, preferredVersion) {
                           onChange={(e) => setArtifactManualCoreVoice(e.target.value)}
                           placeholder="How should this sound? e.g., crisp, insightful, slightly witty, no fluff."
                         />
-                        <p className="note" style={{ marginTop: "6px" }}>Fast path: only Voice Style + tone nuances required.</p>
                       </div>
                     )}
                   </div>
@@ -3990,6 +4049,15 @@ async function refreshVersions(projectId, preferredVersion) {
                       <h3 style={{ marginTop: 0 }}>Image Style</h3>
                       <p className="note" style={{ marginTop: "4px" }}>
                         Selected image formats: {artifactSelectedImageFormatCards.map((x) => x.key).join(", ") || "(none)"}
+                        {artifactSuggestionsLoading ? (
+                          <span style={{ marginLeft: "10px", fontStyle: "italic", color: "#888" }}>
+                            ✦ Generating AI suggestions…
+                          </span>
+                        ) : artifactSuggestions && artifactSuggestions.image ? (
+                          <span style={{ marginLeft: "10px", fontStyle: "italic", color: "#22c55e" }}>
+                            ✦ AI suggestions applied — edit freely
+                          </span>
+                        ) : null}
                       </p>
 
                       <div className="artifact-style-subsection">
@@ -4160,6 +4228,15 @@ async function refreshVersions(projectId, preferredVersion) {
                       <h3 style={{ marginTop: 0 }}>Video Style</h3>
                       <p className="note" style={{ marginTop: "4px" }}>
                         Selected video formats: {artifactSelectedVideoFormatCards.map((x) => x.key).join(", ") || "(none)"}
+                        {artifactSuggestionsLoading ? (
+                          <span style={{ marginLeft: "10px", fontStyle: "italic", color: "#888" }}>
+                            ✦ Generating AI suggestions…
+                          </span>
+                        ) : artifactSuggestions && artifactSuggestions.video ? (
+                          <span style={{ marginLeft: "10px", fontStyle: "italic", color: "#22c55e" }}>
+                            ✦ AI suggestions applied — edit freely
+                          </span>
+                        ) : null}
                       </p>
 
                       <div className="artifact-style-subsection">
@@ -4822,12 +4899,14 @@ async function refreshVersions(projectId, preferredVersion) {
                         const artifact = publishArtifactsById[row.artifact_id] || null;
                         const primaryPart = String(row.primary_part || "").trim();
                         const canIncludeTags = artifactHasTags(artifact);
+                        const showIncludeTags = !!row.artifact_id && canIncludeTags && String(fieldKey || "").trim() !== "cta_variants";
                         return (
                           <div key={row.source_id || `${fieldKey}-${idx}`} className="publish-source-row">
                             <div className="publish-source-compact-row">
                               <div className="publish-source-artifact">
                                 <label>Artifact</label>
                                 <select
+                                  className="publish-source-select"
                                   value={row.artifact_id || ""}
                                   onChange={(e) => {
                                     const artifactId = e.target.value;
@@ -4847,26 +4926,28 @@ async function refreshVersions(projectId, preferredVersion) {
                                   ))}
                                 </select>
                               </div>
-                              <div className="publish-source-options">
-                                <label className="tag" style={{ display: "inline-flex", alignItems: "center", marginBottom: 0 }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={!!row.include_tags}
-                                    disabled={!row.artifact_id || !canIncludeTags}
-                                    onChange={(e) => updatePublishSourceRow(fieldKey, row.source_id, { include_tags: !!e.target.checked })}
-                                    style={{ width: "auto", marginRight: "6px" }}
-                                  />
-                                  Include tags
-                                </label>
-                              </div>
+                              {showIncludeTags ? (
+                                <div className="publish-source-options">
+                                  <label className="tag publish-source-tags-toggle" style={{ display: "inline-flex", alignItems: "center", marginBottom: 0 }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={!!row.include_tags}
+                                      onChange={(e) => updatePublishSourceRow(fieldKey, row.source_id, { include_tags: !!e.target.checked })}
+                                      style={{ width: "auto", marginRight: "6px" }}
+                                    />
+                                    Include tags
+                                  </label>
+                                </div>
+                              ) : <div />}
                               <div className="publish-source-actions">
-                                <span className="note">#{idx + 1}</span>
                                 <button
                                   type="button"
-                                  className="secondary"
+                                  className="secondary publish-delete-button"
                                   onClick={() => removePublishSourceRow(fieldKey, row.source_id)}
+                                  aria-label="Delete source"
+                                  title="Delete source"
                                 >
-                                  Remove
+                                  X
                                 </button>
                               </div>
                             </div>
