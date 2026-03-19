@@ -99,8 +99,8 @@ class VoiceProfileResolveNode(OrchestrationNode):
                 },
             )
 
-        collection = self.repo.get_collection(profile_uuid)
-        if collection is None:
+        voice_profile = self.repo.get_voice_profile(profile_uuid)
+        if voice_profile is None:
             context.state.pop("voice_profile", None)
             return NodeExecutionResult(
                 status="completed",
@@ -127,8 +127,9 @@ class VoiceProfileResolveNode(OrchestrationNode):
         style_summary = selected.style_summary if isinstance(selected.style_summary, dict) else {}
         raw_profile_json = selected.raw_profile_json if isinstance(selected.raw_profile_json, dict) else {}
         resolved_payload = {
-            "voice_profile_id": str(collection.voice_profile_id),
+            "voice_profile_id": str(voice_profile.voice_profile_id),
             "voice_profile_version_id": str(selected.voice_profile_version_id),
+            "voice_profile_name": str(voice_profile.voice_profile_name),
             "version_no": int(selected.version_no),
             "generation_status": str(selected.generation_status or ""),
             "core_voice": str(selected.core_voice or "not specified"),

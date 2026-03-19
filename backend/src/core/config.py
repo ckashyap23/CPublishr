@@ -10,21 +10,26 @@ class Settings(BaseSettings):
     cors_allow_origins: str = (
         "http://127.0.0.1:3000,http://localhost:3000,"
         "http://127.0.0.1:3001,http://localhost:3001,"
-        "http://127.0.0.1:5173,http://localhost:5173,"
-        "https://publishrui.onrender.com"
+        "http://127.0.0.1:5173,http://localhost:5173"
     )
 
     # DB bootstrap behavior
     db_auto_create: bool = True
 
+    # LLM provider: "azure" (default) or "openai"
+    llm_provider: str = "azure"
+
+    # Standard OpenAI (used when llm_provider=openai)
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+
     # Auth
-    auth_jwt_secret: str = "change-me-in-env"
+    auth_jwt_secret: str
     auth_jwt_algorithm: str = "HS256"
     auth_access_token_expire_minutes: int = 60 * 24
 
     # Azure OpenAI
     azure_openai_endpoint: str = ""
-    azure_openai_model_name: str = "gpt-4o-mini"
     azure_openai_deployment: str = "gpt-4o-mini"
     azure_openai_subscription_key: str = ""
     azure_openai_api_version: str = "2024-12-01-preview"

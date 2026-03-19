@@ -6,12 +6,10 @@ from src.db.repositories.publish_repository import PublishRepository
 from src.db.repositories.user_context_repository import UserContextRepository
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.voice_profile_module_repository import VoiceProfileModuleRepository
-from src.db.repositories.voice_profile_repository import VoiceProfileRepository
 
 __all__ = [
     "UserRepository",
     "UserContextRepository",
-    "VoiceProfileRepository",
     "VoiceProfileModuleRepository",
     "ProjectRepository",
     "ContentRepository",

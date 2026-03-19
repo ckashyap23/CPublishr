@@ -1,5 +1,8 @@
 from sqlalchemy.orm import Session
+import io
 import json
+import tempfile
+import zipfile
 from typing import Any
 from pathlib import Path
 import re
@@ -17,6 +20,7 @@ from src.platforms.adapters.registry import get_adapter, get_platform_field_sche
 from src.schemas.publishing_schemas import (
     ArtifactPublishRequest,
     ArtifactPublishJobResponse,
+    DownloadBundleRequest,
     SaveToPublishRequest,
     SaveToPublishResponse,
 )
@@ -230,6 +234,151 @@ class PublishingService:
             output_path=created,
         )
 
+    def download_bundle(self, payload: DownloadBundleRequest) -> tuple[bytes, str, str | None]:
+        """Build the publish bundle as a ZIP.
+
+        Returns (zip_bytes, filename, saved_path).
+        If output_path is provided the ZIP is also written to that destination
+        (local, azure://, or gs://) and saved_path is the resulting URI/path.
+        """
+        project_id = str(payload.project_id or "").strip()
+        platform = str(payload.platform or "").strip().lower()
+        user_name = str(payload.user_name or "").strip()
+        output_path = str(payload.output_path or "").strip() or None
+        if not project_id:
+            raise ValueError("project_id is required")
+        if not platform:
+            raise ValueError("platform is required")
+        if not user_name:
+            raise ValueError("user_name is required")
+
+        if output_path:
+            self._validate_output_root(output_path)
+            lower = output_path.lower()
+            if not lower.startswith(("azure://", "az://", "gs://")):
+                raise ValueError(
+                    "Only remote paths (azure://, az://, gs://) are supported for download-bundle. "
+                    "Leave the path empty to download the ZIP directly."
+                )
+
+        self.projects.get_or_create(project_id)
+        adapter, fields, field_mapping_entities, mapping_snapshot = self._resolve_field_mappings(
+            project_id=project_id,
+            platform=platform,
+            field_mappings=list(payload.field_mappings or []),
+        )
+        platform_payload = adapter.build_platform_payload(field_mapping=field_mapping_entities)
+
+        _, _, leaf, relative = self._resolve_save_publish_path_parts(
+            project_id=project_id,
+            platform=platform,
+            user_name=user_name,
+        )
+
+        buf = io.BytesIO()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            if hasattr(adapter, "save_to_publish_bundle"):
+                adapter.save_to_publish_bundle(
+                    payload=platform_payload,
+                    output_root=tmp_dir,
+                    relative_path=relative,
+                )
+            else:
+                out_dir = Path(tmp_dir) / Path(relative)
+                out_dir.mkdir(parents=True, exist_ok=True)
+                (out_dir / "payload.json").write_text(
+                    json.dumps(platform_payload, indent=2, default=str), encoding="utf-8"
+                )
+
+            bundle_dir = Path(tmp_dir) / Path(relative)
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                if bundle_dir.exists():
+                    for file_path in bundle_dir.rglob("*"):
+                        if file_path.is_file():
+                            arcname = str(file_path.relative_to(bundle_dir))
+                            zf.write(file_path, arcname)
+
+        zip_bytes = buf.getvalue()
+        zip_filename = f"{leaf}.zip"
+
+        saved_path: str | None = None
+        if output_path:
+            saved_path = self._save_zip_to_destination(
+                zip_bytes=zip_bytes,
+                zip_filename=zip_filename,
+                output_root=output_path,
+                relative=relative,
+            )
+
+        return zip_bytes, zip_filename, saved_path
+
+    def _save_zip_to_destination(
+        self,
+        *,
+        zip_bytes: bytes,
+        zip_filename: str,
+        output_root: str,
+        relative: str,
+    ) -> str:
+        """Write a ZIP file to a local, Azure, or GCS destination."""
+        lower = output_root.lower()
+        if lower.startswith(("azure://", "az://")):
+            try:
+                from azure.storage.blob import BlobServiceClient, ContentSettings  # type: ignore
+            except Exception as exc:
+                raise ValueError("azure-storage-blob is not installed.") from exc
+            conn = str(settings.azure_storage_connection_string or "").strip()
+            if not conn:
+                raise ValueError("AZURE_STORAGE_CONNECTION_STRING is required for azure:// paths.")
+            parsed = urlparse(output_root)
+            container = (parsed.netloc or "").strip()
+            if not container:
+                raise ValueError("Azure path must include a container, e.g. azure://artifacts/prefix")
+            prefix = (parsed.path or "").strip().strip("/")
+            blob_path = self._join_prefix(prefix, relative, zip_filename)
+            svc = BlobServiceClient.from_connection_string(conn)
+            container_client = svc.get_container_client(container)
+            try:
+                container_client.create_container()
+            except Exception:
+                pass
+            container_client.upload_blob(
+                blob_path, zip_bytes, overwrite=True,
+                content_settings=ContentSettings(content_type="application/zip"),
+            )
+            account_url = svc.url.rstrip("/")
+            return f"{account_url}/{container}/{blob_path}"
+        elif lower.startswith("gs://"):
+            try:
+                from google.cloud import storage  # type: ignore
+            except Exception as exc:
+                raise ValueError("google-cloud-storage is not installed.") from exc
+            parsed = urlparse(output_root)
+            bucket = (parsed.netloc or "").strip()
+            if not bucket:
+                raise ValueError("GCS path must include a bucket, e.g. gs://my-bucket/prefix")
+            prefix = (parsed.path or "").strip().strip("/")
+            blob_path = self._join_prefix(prefix, relative, zip_filename)
+            client = storage.Client()
+            bucket_ref = client.bucket(bucket)
+            blob_ref = bucket_ref.blob(blob_path)
+            blob_ref.upload_from_string(zip_bytes, content_type="application/zip")
+            return f"gs://{bucket}/{blob_path}"
+        else:
+            base = output_root.strip()
+            if base.lower().startswith("file://"):
+                parsed = urlparse(base)
+                base = parsed.path or ""
+                if parsed.netloc:
+                    base = f"//{parsed.netloc}{base}"
+                if re.match(r"^/[A-Za-z]:", base):
+                    base = base[1:]
+            target_dir = Path(base) / Path(relative)
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target_file = target_dir / zip_filename
+            target_file.write_bytes(zip_bytes)
+            return str(target_file)
+
     def browse_output_locations(self, path: str | None = None) -> dict[str, Any]:
         raw = str(path or "").strip()
         if not raw:
@@ -267,26 +416,40 @@ class PublishingService:
             "directories": children,
         }
 
-    def pick_local_output_path(self, start_path: str | None = None) -> str | None:
+    def pick_local_output_path(self, start_path: str | None = None, *, mode: str | None = None) -> str | list[str] | None:
         """
-        Open native OS folder picker on the backend host machine.
+        Open native OS local path picker on the backend host machine.
         Returns selected absolute path or None if cancelled.
         """
         try:
             import tkinter as tk  # type: ignore
-            from tkinter import filedialog  # type: ignore
+            from tkinter import filedialog, messagebox  # type: ignore
         except Exception as exc:
             raise ValueError("Native local folder picker is unavailable (tkinter not installed).") from exc
 
-        initial_dir = str(start_path or "").strip()
-        if initial_dir.lower().startswith("file://"):
-            parsed = urlparse(initial_dir)
-            initial_dir = parsed.path or ""
-            if re.match(r"^/[A-Za-z]:", initial_dir):
-                initial_dir = initial_dir[1:]
+        initial_value = str(start_path or "").strip()
+        if initial_value.lower().startswith("file://"):
+            parsed = urlparse(initial_value)
+            initial_value = parsed.path or ""
+            if re.match(r"^/[A-Za-z]:", initial_value):
+                initial_value = initial_value[1:]
 
-        if initial_dir and not Path(initial_dir).exists():
-            initial_dir = ""
+        initial_path = Path(initial_value) if initial_value else None
+        if initial_path and not initial_path.exists():
+            initial_path = None
+
+        normalized_mode = str(mode or "folder").strip().lower()
+        if normalized_mode not in {"folder", "file", "files"}:
+            normalized_mode = "folder"
+
+        initial_dir = ""
+        initial_file = ""
+        if initial_path is not None:
+            if initial_path.is_dir():
+                initial_dir = str(initial_path)
+            elif initial_path.is_file():
+                initial_dir = str(initial_path.parent)
+                initial_file = initial_path.name
 
         root = tk.Tk()
         root.withdraw()
@@ -295,18 +458,37 @@ class PublishingService:
         except Exception:
             pass
         try:
-            selected = filedialog.askdirectory(
-                parent=root,
-                initialdir=initial_dir or None,
-                title="Select output folder",
-                mustexist=False,
-            )
+            if normalized_mode == "files":
+                selected = list(
+                    filedialog.askopenfilenames(
+                        parent=root,
+                        initialdir=initial_dir or None,
+                        title="Select files",
+                    )
+                )
+            elif normalized_mode == "file":
+                selected = filedialog.askopenfilename(
+                    parent=root,
+                    initialdir=initial_dir or None,
+                    initialfile=initial_file or None,
+                    title="Select file",
+                )
+            else:
+                selected = filedialog.askdirectory(
+                    parent=root,
+                    initialdir=initial_dir or None,
+                    title="Select folder",
+                    mustexist=False,
+                )
         finally:
             try:
                 root.destroy()
             except Exception:
                 pass
 
+        if isinstance(selected, (list, tuple)):
+            values = [str(x).strip() for x in selected if str(x).strip()]
+            return values or None
         selected = str(selected or "").strip()
         return selected or None
 

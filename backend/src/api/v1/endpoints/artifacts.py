@@ -18,6 +18,7 @@ from src.schemas.artifacts import (
     ArtifactSuggestResponse,
     ArtifactTitleUpdateRequest,
 )
+from src.db.models.artifact import Artifact
 from src.services.orchestration.artifact_schema import formats_by_kind_map
 from src.services.orchestration.artifacts.contracts import GenerationOptions
 from src.services.orchestration.artifacts.orchestrator import ArtifactPipelineOrchestrator
@@ -80,7 +81,7 @@ def _refresh_sas_urls_in_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _to_entity(a) -> ArtifactEntity:
+def _to_entity(a: Artifact) -> ArtifactEntity:
     payload = a.payload_json or {}
     # Refresh SAS URLs in assets before returning
     payload = _refresh_sas_urls_in_payload(payload)
@@ -107,7 +108,7 @@ def list_artifact_formats_catalog() -> dict[str, dict[str, list[str]]]:
         return {"formats_by_kind": formats_by_kind_map()}
     except Exception as exc:
         logger.exception("Failed to load artifact formats catalog")
-        raise HTTPException(status_code=500, detail=f"Failed to load artifact formats catalog: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to load artifact formats catalog") from exc
 
 
 @router.patch("/item/{artifact_id}/title", response_model=ArtifactEntity)
@@ -145,7 +146,7 @@ def generate_artifacts(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Artifact generation failed for project_id=%s", payload.project_id)
-        raise HTTPException(status_code=500, detail=f"Artifact generation failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Artifact generation failed") from exc
     return ArtifactGenerationResponse.model_validate(out)
 
 
@@ -170,7 +171,7 @@ def edit_artifact(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Artifact edit failed for artifact_id=%s mode=%s", payload.artifact_id, payload.mode)
-        raise HTTPException(status_code=500, detail=f"Artifact edit failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Artifact edit failed") from exc
     return ArtifactEditResponse.model_validate(out)
 
 
@@ -187,7 +188,7 @@ def suggest_artifact_styles(
         suggestions = svc.suggest(project_id=payload.project_id, formats=payload.formats)
     except Exception as exc:
         logger.exception("Artifact style suggestion failed for project_id=%s", payload.project_id)
-        raise HTTPException(status_code=500, detail=f"Suggestion failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Artifact style suggestion failed") from exc
     return ArtifactSuggestResponse(suggestions=suggestions)
 
 

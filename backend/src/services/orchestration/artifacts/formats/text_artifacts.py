@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from src.core.config import settings
-from src.services.llm.azure_openai import AzureOpenAIClient, parse_json_object
+from src.services.llm.client import chat, is_enabled, parse_json_object
 from src.services.orchestration.artifact_schema import default_payload_template
 from src.services.orchestration.artifacts.contracts import ArtifactDraft, PipelineContext
 from src.services.orchestration.artifacts.persistence import save_text_to_local, upload_artifact_text
@@ -31,8 +31,8 @@ class TextArtifactsBuilder:
     kind = "text"
     formats = set(TEXT_FORMATS)
 
-    def __init__(self, llm: AzureOpenAIClient | None = None):
-        self.llm = llm or AzureOpenAIClient()
+    def __init__(self):
+        
         self.enable_llm = bool(settings.artifact_text_llm_enabled)
 
     # -------------------------------------------------------------------------
@@ -825,9 +825,9 @@ tags_json:
     # LLM calls
     # -------------------------------------------------------------------------
     def _run_llm_json(self, *, system_prompt: str, user_prompt: str, max_tokens: int = 1800) -> dict[str, Any]:
-        if not (self.enable_llm and self.llm and self.llm.enabled):
+        if not (self.enable_llm and is_enabled()):
             return {}
-        raw = self.llm.chat(
+        raw = chat(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.2,
@@ -849,7 +849,7 @@ tags_json:
         ctx: PipelineContext,
         governance: dict[str, Any],
     ) -> tuple[dict[str, Any], str, str]:
-        if not (self.enable_llm and self.llm and self.llm.enabled):
+        if not (self.enable_llm and is_enabled()):
             return {}, "", ""
 
         system_prompt, user_prompt = self._build_generation_prompts(fmt=fmt, ctx=ctx, governance=governance)
@@ -867,7 +867,7 @@ tags_json:
         edit_instruction: str,
         governance: dict[str, Any],
     ) -> tuple[dict[str, Any], str, str]:
-        if not (self.enable_llm and self.llm and self.llm.enabled):
+        if not (self.enable_llm and is_enabled()):
             return {}, "", ""
 
         system_prompt, user_prompt = self._build_edit_prompts(
@@ -1014,7 +1014,7 @@ tags_json:
             raise ValueError(f"Unsupported text format for text builder: {fmt}")
 
         governance = self._effective_governance_for_build(ctx=ctx, fmt=fmt)
-        llm_attempted = bool(self.enable_llm and self.llm and self.llm.enabled)
+        llm_attempted = bool(self.enable_llm and is_enabled())
 
         llm_out: dict[str, Any] = {}
         llm_system_prompt = ""
@@ -1115,7 +1115,7 @@ tags_json:
             source_payload=source_payload,
         )
 
-        llm_attempted = bool(self.enable_llm and self.llm and self.llm.enabled)
+        llm_attempted = bool(self.enable_llm and is_enabled())
         llm_out: dict[str, Any] = {}
         try:
             llm_out, system_prompt, user_prompt = self._edit_with_llm(

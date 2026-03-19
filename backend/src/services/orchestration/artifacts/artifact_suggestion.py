@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from src.db.repositories.content_repository import ContentRepository
 from src.db.repositories.project_repository import ProjectRepository
-from src.services.llm.azure_openai import AzureOpenAIClient, parse_json_object
+from src.services.llm.client import chat, is_enabled, parse_json_object
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +186,7 @@ class ArtifactSuggestionService:
         self.user_id = user_id
         self.projects = ProjectRepository(db, user_id=user_id)
         self.contents = ContentRepository(db, user_id=user_id)
-        self.llm = AzureOpenAIClient()
+        
 
     def suggest(
         self,
@@ -206,7 +206,7 @@ class ArtifactSuggestionService:
         Only kinds present among the requested formats are included.
         Returns an empty dict if no media formats are requested or if LLM is not configured.
         """
-        if not self.llm.enabled:
+        if not is_enabled():
             logger.warning("LLM not configured — skipping artifact suggestions")
             return {}
 
@@ -246,7 +246,7 @@ class ArtifactSuggestionService:
                     core_idea=core_idea,
                     master_body=master_body,
                 )
-                raw_text = self.llm.chat(
+                raw_text = chat(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=0.6,

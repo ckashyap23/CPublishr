@@ -23,7 +23,12 @@ class VoiceProfileVersionDataset(Base):
         nullable=False,
         index=True,
     )
-    dataset_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    dataset_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("voice_profile_datasets.dataset_id"),
+        nullable=False,
+        index=True,
+    )
     dataset_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_profile: Mapped[str | None] = mapped_column(Text, nullable=True)
     sample_size: Mapped[int | None] = mapped_column(Integer, nullable=True)

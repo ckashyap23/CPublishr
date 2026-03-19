@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 
 from src.contracts.prd import ResearchTrendResponse
-from src.services.llm.azure_openai import AzureOpenAIClient, parse_json_object
+from src.services.llm.client import chat, is_enabled, parse_json_object
 from src.services.orchestration.contracts import NodeExecutionContext, NodeExecutionResult
 from src.services.orchestration.nodes.base import OrchestrationNode
 from src.services.storage.prompt_blob_storage import format_chat_prompt_text, save_prompt_text
@@ -45,8 +45,7 @@ DEFAULT_RESEARCH_PROMPTS: dict[str, str] = {
 class ResearchTrendsNode(OrchestrationNode):
     name = "research_trends"
 
-    def __init__(self, llm: AzureOpenAIClient | None = None, prompts: dict[str, str] | None = None):
-        self.llm = llm
+    def __init__(self, prompts: dict[str, str] | None = None):
         # Exposed prompt map so users can override/update prompts externally.
         self.prompts = prompts or DEFAULT_RESEARCH_PROMPTS.copy()
 
@@ -69,7 +68,7 @@ class ResearchTrendsNode(OrchestrationNode):
         prompt_suffix: str,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        if not self.llm or not self.llm.enabled:
+        if not is_enabled():
             return {}
         system_prompt = self.prompts[system_key]
         user_prompt = self.prompts[user_key].format(**kwargs)
@@ -81,7 +80,7 @@ class ResearchTrendsNode(OrchestrationNode):
             suffix=prompt_suffix,
             text=format_chat_prompt_text(system_prompt=system_prompt, user_prompt=user_prompt),
         )
-        raw = self.llm.chat(
+        raw = chat(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.2,

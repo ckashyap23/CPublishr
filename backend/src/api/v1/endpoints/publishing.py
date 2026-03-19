@@ -1,4 +1,7 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_current_user_id, get_db
@@ -6,6 +9,7 @@ from src.contracts.prd import DistributionRequest, DistributionResponse
 from src.schemas.publishing_schemas import (
     ArtifactPublishJobResponse,
     ArtifactPublishRequest,
+    DownloadBundleRequest,
     OutputPathPickRequest,
     OutputPathPickResponse,
     PublishPlatformFieldSchemaResponse,
@@ -76,6 +80,28 @@ def save_to_publish(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/download-bundle")
+def download_bundle(
+    payload: DownloadBundleRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> Response:
+    try:
+        zip_bytes, filename, saved_path = PublishingService(db, user_id=user_id).download_bundle(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if payload.output_path:
+        return Response(
+            content=json.dumps({"status": "saved", "output_path": saved_path, "filename": filename}),
+            media_type="application/json",
+        )
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/output-path/browse", response_model=OutputPathBrowseResponse)
 def browse_output_path(
     path: str | None = Query(default=None),
@@ -96,7 +122,10 @@ def pick_local_output_path(
     db: Session = Depends(get_db),
 ) -> OutputPathPickResponse:
     try:
-        selected = PublishingService(db, user_id=user_id).pick_local_output_path(payload.start_path)
+        selected = PublishingService(db, user_id=user_id).pick_local_output_path(
+            payload.start_path,
+            mode=payload.mode,
+        )
         return OutputPathPickResponse(selected_path=selected)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

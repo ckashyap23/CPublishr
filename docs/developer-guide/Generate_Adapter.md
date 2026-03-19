@@ -1,7 +1,7 @@
 # Generate Adapter (Publish Platform Adapter Guide)
 
 This guide describes how to add a new platform adapter for the `Publish` stage.
-For runtime behavior, endpoint details, and save-to-publish flow, refer to `docs/teamwork/Publishing.md`.
+For runtime behavior, endpoint details, and save-to-publish flow, refer to `docs/developer-guide/Publishing.md`.
 
 ## Location and discovery
 

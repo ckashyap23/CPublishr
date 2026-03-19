@@ -1,6 +1,10 @@
+from __future__ import annotations
+
+import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
@@ -8,22 +12,24 @@ from src.db.base import Base
 
 class VoiceProfile(Base):
     __tablename__ = "voice_profiles"
+    __table_args__ = (
+        UniqueConstraint("collection_id", "voice_profile_name", name="uq_voice_profiles_collection_name"),
+    )
 
-    voice_profile_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String(120), nullable=False)
-    description: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    rules_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    is_default: Mapped[bool] = mapped_column(default=False, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
-
-class VoiceProfilePlatform(Base):
-    __tablename__ = "voice_profile_platforms"
-
-    row_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    voice_profile_id: Mapped[str] = mapped_column(ForeignKey("voice_profiles.voice_profile_id"), nullable=False, index=True)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), nullable=False, index=True)
-    platform: Mapped[str] = mapped_column(String(32), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    voice_profile_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    collection_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("voice_profile_collections.collection_id"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[str] = mapped_column(String(64), ForeignKey("users.user_id"), nullable=False, index=True)
+    voice_profile_name: Mapped[str] = mapped_column(Text, nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

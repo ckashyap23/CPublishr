@@ -18,7 +18,7 @@ from src.db.repositories.editorial_session_repository import EditorialSessionRep
 from src.db.repositories.project_repository import ProjectRepository
 from src.db.repositories.voice_profile_module_repository import VoiceProfileModuleRepository
 from src.services.orchestration.artifact_schema import allowed_formats
-from src.services.llm.azure_openai import AzureOpenAIClient
+from src.services.llm.client import chat, is_enabled
 from src.services.orchestration.artifacts.contracts import GenerationOptions
 from src.services.orchestration.artifacts.orchestrator import ArtifactPipelineOrchestrator
 from src.services.orchestration.contracts import NodeExecutionContext, NodeExecutionResult
@@ -44,13 +44,12 @@ class OrchestrationEngine:
         self.editorial_sessions = EditorialSessionRepository(db, user_id=user_id)
         self.voice_profiles = VoiceProfileModuleRepository(db, user_id=user_id)
         self.platform_registry = default_platform_registry()
-        self.llm = AzureOpenAIClient()
 
-        self.node0 = TopicInitializationNode(self.llm)
-        self.node1 = ResearchTrendsNode(self.llm)
+        self.node0 = TopicInitializationNode()
+        self.node1 = ResearchTrendsNode()
         self.node1_5 = VoiceProfileResolveNode(self.voice_profiles)
-        self.node2 = MasterContentNode(self.llm)
-        self.node3 = EditorialNode(self.llm)
+        self.node2 = MasterContentNode()
+        self.node3 = EditorialNode()
 
     @staticmethod
     def _inherit_variant_label_from_source(source) -> str | None:
@@ -357,7 +356,7 @@ class OrchestrationEngine:
             raise ValueError("structure_outline must contain at least one section")
 
         preview = source.content
-        if self.llm and self.llm.enabled:
+        if is_enabled():
             system_prompt = "You are a careful editorial assistant."
             prompt = (
                 "Rewrite the markdown content to align with this section order while preserving meaning and facts.\n"
@@ -373,7 +372,7 @@ class OrchestrationEngine:
                 suffix="editorial_outline",
                 text=format_chat_prompt_text(system_prompt=system_prompt, user_prompt=prompt),
             )
-            preview = self.llm.chat(
+            preview = chat(
                 system_prompt=system_prompt,
                 user_prompt=prompt,
                 temperature=0.3,

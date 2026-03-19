@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.services.llm.azure_openai import AzureOpenAIClient, parse_json_object
+from src.services.llm.client import chat, is_enabled, parse_json_object
 from src.services.orchestration.contracts import NodeExecutionContext, NodeExecutionResult
 from src.services.orchestration.nodes.base import OrchestrationNode
 from src.services.storage.prompt_blob_storage import format_chat_prompt_text, save_prompt_text
@@ -163,8 +163,6 @@ class MasterContentNode(OrchestrationNode):
 
     name = "master_content"
 
-    def __init__(self, llm: Optional[AzureOpenAIClient] = None):
-        self.llm = llm
 
     # ----------------------------
     # Utilities
@@ -399,7 +397,7 @@ class MasterContentNode(OrchestrationNode):
         project_id: str,
         prompt_name: str,
     ) -> str:
-        if not (self.llm and self.llm.enabled):
+        if not (is_enabled()):
             return bad_doc
 
         repair_system = "You are an editorial formatter. Fix structure without changing meaning."
@@ -437,7 +435,7 @@ Document to fix:
             text=format_chat_prompt_text(system_prompt=repair_system, user_prompt=repair_user),
         )
 
-        fixed = self.llm.chat(
+        fixed = chat(
             system_prompt=repair_system,
             user_prompt=repair_user,
             temperature=0.1,
@@ -592,7 +590,7 @@ Document to fix:
         }
         used_base_llm = False
 
-        if self.llm and self.llm.enabled:
+        if is_enabled():
             editorial_brief = self._build_editorial_brief(
                 target_audience=target_audience,
                 target_audience_notes=target_audience_notes,
@@ -681,7 +679,7 @@ Requirements:
                     suffix="base",
                     text=format_chat_prompt_text(system_prompt=base_system_prompt, user_prompt=base_user_prompt),
                 )
-                raw = self.llm.chat(
+                raw = chat(
                     system_prompt=base_system_prompt,
                     user_prompt=base_user_prompt,
                     temperature=0.35 if structure_policy == "structured" else 0.5,
@@ -812,7 +810,7 @@ Also:
                         )
 
                         try:
-                            v_raw = self.llm.chat(
+                            v_raw = chat(
                                 system_prompt=base_system_prompt,
                                 user_prompt=variant_user_prompt,
                                 temperature=temp,
@@ -909,7 +907,7 @@ Also:
         logger.info(
             "MasterContentNode complete: source=%s llm_enabled=%s variants=%s",
             "llm" if used_base_llm else "fallback",
-            bool(self.llm and self.llm.enabled),
+            bool(is_enabled()),
             len(contract_out["master_variants"]),
         )
         context.state["master"] = contract_out

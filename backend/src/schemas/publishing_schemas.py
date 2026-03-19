@@ -64,9 +64,18 @@ class OutputPathBrowseResponse(BaseModel):
     directories: list[str] = Field(default_factory=list)
 
 
+class DownloadBundleRequest(BaseModel):
+    project_id: str
+    platform: str
+    user_name: str
+    output_path: str | None = None
+    field_mappings: list[PublishFieldArtifactMapping] = Field(default_factory=list)
+
+
 class OutputPathPickRequest(BaseModel):
     start_path: str | None = None
+    mode: str | None = None
 
 
 class OutputPathPickResponse(BaseModel):
-    selected_path: str | None = None
+    selected_path: str | list[str] | None = None

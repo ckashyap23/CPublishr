@@ -15,7 +15,9 @@ from src.db.models.project import Project
 from src.db.models.publish_job import PublishJob
 from src.db.models.user import User
 from src.db.models.user_context_memory import UserContextMemory
+from src.db.models.voice_profile import VoiceProfile
 from src.db.models.voice_profile_collection import VoiceProfileCollection
+from src.db.models.voice_profile_dataset import VoiceProfileDataset
 from src.db.models.voice_profile_version import VoiceProfileVersion
 from src.db.models.voice_profile_version_dataset import VoiceProfileVersionDataset
 from src.db.session import get_engine
@@ -32,6 +34,8 @@ TARGET_TABLES = [
     EditorialSession.__table__,
     UserContextMemory.__table__,
     VoiceProfileCollection.__table__,
+    VoiceProfileDataset.__table__,
+    VoiceProfile.__table__,
     VoiceProfileVersion.__table__,
     VoiceProfileVersionDataset.__table__,
     DatasetEntry.__table__,

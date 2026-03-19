@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.db.models.dataset_entry import DatasetEntry
+from src.db.models.voice_profile import VoiceProfile
 from src.db.models.voice_profile_collection import VoiceProfileCollection
+from src.db.models.voice_profile_dataset import VoiceProfileDataset
 from src.db.models.voice_profile_version import VoiceProfileVersion
 from src.db.models.voice_profile_version_dataset import VoiceProfileVersionDataset
 
@@ -25,56 +27,146 @@ class VoiceProfileModuleRepository:
         )
         return list(self.db.execute(stmt).scalars().all())
 
-    def get_collection(self, voice_profile_id: uuid.UUID) -> VoiceProfileCollection | None:
+    def get_collection(self, collection_id: uuid.UUID) -> VoiceProfileCollection | None:
         stmt = (
             select(VoiceProfileCollection)
             .where(VoiceProfileCollection.user_id == self.user_id)
-            .where(VoiceProfileCollection.voice_profile_id == voice_profile_id)
+            .where(VoiceProfileCollection.collection_id == collection_id)
             .limit(1)
         )
         return self.db.execute(stmt).scalars().first()
 
-    def create_collection(self, *, voice_profile_name: str, platforms: list[str]) -> tuple[VoiceProfileCollection, VoiceProfileVersion]:
+    def create_collection(self, *, collection_name: str, platforms: list[str]) -> VoiceProfileCollection:
         now = datetime.now(UTC)
         collection = VoiceProfileCollection(
-            voice_profile_id=uuid.uuid4(),
+            collection_id=uuid.uuid4(),
             user_id=self.user_id,
-            voice_profile_name=voice_profile_name.strip(),
+            collection_name=collection_name.strip(),
             platforms=sorted({str(x).strip().lower() for x in platforms if str(x).strip()}),
             created_at=now,
             updated_at=now,
         )
         self.db.add(collection)
-        self.db.flush()
+        self.db.commit()
+        self.db.refresh(collection)
+        return collection
 
-        initial = VoiceProfileVersion(
-            voice_profile_version_id=uuid.uuid4(),
-            voice_profile_id=collection.voice_profile_id,
-            version_no=1,
-            is_active=False,
-            intended_use=None,
-            core_voice=None,
-            style_summary={},
-            tone_baseline={},
-            do_rules=[],
-            dont_rules=[],
-            raw_profile_json={},
-            generation_status="draft",
-            approved_at=None,
+    def list_datasets(self, collection_id: uuid.UUID) -> list[VoiceProfileDataset]:
+        stmt = (
+            select(VoiceProfileDataset)
+            .where(VoiceProfileDataset.user_id == self.user_id)
+            .where(VoiceProfileDataset.collection_id == collection_id)
+            .order_by(VoiceProfileDataset.created_at.asc())
+        )
+        return list(self.db.execute(stmt).scalars().all())
+
+    def get_dataset(self, dataset_id: uuid.UUID) -> VoiceProfileDataset | None:
+        stmt = (
+            select(VoiceProfileDataset)
+            .where(VoiceProfileDataset.user_id == self.user_id)
+            .where(VoiceProfileDataset.dataset_id == dataset_id)
+            .limit(1)
+        )
+        return self.db.execute(stmt).scalars().first()
+
+    def create_dataset(
+        self,
+        *,
+        collection_id: uuid.UUID,
+        dataset_name: str,
+        source_profile: str | None,
+        blob_prefix: str,
+        sample_scope_note: str | None,
+    ) -> VoiceProfileDataset:
+        now = datetime.now(UTC)
+        row = VoiceProfileDataset(
+            dataset_id=uuid.uuid4(),
+            collection_id=collection_id,
+            user_id=self.user_id,
+            dataset_name=dataset_name.strip(),
+            source_profile=source_profile,
+            blob_prefix=blob_prefix.strip(),
+            sample_scope_note=sample_scope_note,
+            entry_count=0,
             created_at=now,
             updated_at=now,
         )
-        self.db.add(initial)
+        self.db.add(row)
+        self.db.flush()
+        return row
+
+    def update_dataset_entry_count(self, dataset_id: uuid.UUID, entry_count: int) -> VoiceProfileDataset:
+        dataset = self.get_dataset(dataset_id)
+        if dataset is None:
+            raise ValueError("Dataset not found")
+        dataset.entry_count = int(entry_count)
+        dataset.updated_at = datetime.now(UTC)
+        self.db.add(dataset)
+        return dataset
+
+    def list_voice_profiles(self, collection_id: uuid.UUID | None = None) -> list[VoiceProfile]:
+        stmt = select(VoiceProfile).where(VoiceProfile.user_id == self.user_id)
+        if collection_id is not None:
+            stmt = stmt.where(VoiceProfile.collection_id == collection_id)
+        stmt = stmt.order_by(VoiceProfile.updated_at.desc())
+        return list(self.db.execute(stmt).scalars().all())
+
+    def get_voice_profile(self, voice_profile_id: uuid.UUID) -> VoiceProfile | None:
+        stmt = (
+            select(VoiceProfile)
+            .where(VoiceProfile.user_id == self.user_id)
+            .where(VoiceProfile.voice_profile_id == voice_profile_id)
+            .limit(1)
+        )
+        return self.db.execute(stmt).scalars().first()
+
+    def create_voice_profile(self, *, collection_id: uuid.UUID, voice_profile_name: str) -> VoiceProfile:
+        now = datetime.now(UTC)
+        row = VoiceProfile(
+            voice_profile_id=uuid.uuid4(),
+            collection_id=collection_id,
+            user_id=self.user_id,
+            voice_profile_name=voice_profile_name.strip(),
+            is_enabled=True,
+            created_at=now,
+            updated_at=now,
+        )
+        self.db.add(row)
         self.db.commit()
-        self.db.refresh(collection)
-        self.db.refresh(initial)
-        return collection, initial
+        self.db.refresh(row)
+        return row
+
+    def set_voice_profile_enabled(self, voice_profile_id: uuid.UUID, is_enabled: bool) -> VoiceProfile:
+        row = self.get_voice_profile(voice_profile_id)
+        if row is None:
+            raise ValueError("Voice profile not found")
+        row.is_enabled = bool(is_enabled)
+        row.updated_at = datetime.now(UTC)
+        self.db.add(row)
+        self.db.commit()
+        self.db.refresh(row)
+        return row
+
+    def delete_voice_profile(self, voice_profile_id: uuid.UUID) -> None:
+        row = self.get_voice_profile(voice_profile_id)
+        if row is None:
+            raise ValueError("Voice profile not found")
+        versions = self.list_versions(voice_profile_id)
+        for version in versions:
+            self.db.query(VoiceProfileVersionDataset).filter(
+                VoiceProfileVersionDataset.voice_profile_version_id == version.voice_profile_version_id
+            ).delete(synchronize_session=False)
+        self.db.query(VoiceProfileVersion).filter(
+            VoiceProfileVersion.voice_profile_id == voice_profile_id
+        ).delete(synchronize_session=False)
+        self.db.delete(row)
+        self.db.commit()
 
     def list_versions(self, voice_profile_id: uuid.UUID) -> list[VoiceProfileVersion]:
         stmt = (
             select(VoiceProfileVersion)
-            .join(VoiceProfileCollection, VoiceProfileCollection.voice_profile_id == VoiceProfileVersion.voice_profile_id)
-            .where(VoiceProfileCollection.user_id == self.user_id)
+            .join(VoiceProfile, VoiceProfile.voice_profile_id == VoiceProfileVersion.voice_profile_id)
+            .where(VoiceProfile.user_id == self.user_id)
             .where(VoiceProfileVersion.voice_profile_id == voice_profile_id)
             .order_by(VoiceProfileVersion.version_no.desc())
         )
@@ -83,8 +175,8 @@ class VoiceProfileModuleRepository:
     def get_version(self, voice_profile_version_id: uuid.UUID) -> VoiceProfileVersion | None:
         stmt = (
             select(VoiceProfileVersion)
-            .join(VoiceProfileCollection, VoiceProfileCollection.voice_profile_id == VoiceProfileVersion.voice_profile_id)
-            .where(VoiceProfileCollection.user_id == self.user_id)
+            .join(VoiceProfile, VoiceProfile.voice_profile_id == VoiceProfileVersion.voice_profile_id)
+            .where(VoiceProfile.user_id == self.user_id)
             .where(VoiceProfileVersion.voice_profile_version_id == voice_profile_version_id)
             .limit(1)
         )
@@ -130,45 +222,27 @@ class VoiceProfileModuleRepository:
         self.db.flush()
         return row
 
-    def upsert_version_dataset(
+    def add_version_dataset(
         self,
         *,
         voice_profile_version_id: uuid.UUID,
-        dataset_id: uuid.UUID,
-        dataset_name: str | None,
-        source_profile: str | None,
+        dataset: VoiceProfileDataset,
         sample_size: int | None,
-        sample_scope_note: str | None,
     ) -> VoiceProfileVersionDataset:
-        stmt = (
-            select(VoiceProfileVersionDataset)
-            .where(VoiceProfileVersionDataset.voice_profile_version_id == voice_profile_version_id)
-            .where(VoiceProfileVersionDataset.dataset_id == dataset_id)
-            .limit(1)
-        )
-        existing = self.db.execute(stmt).scalars().first()
         now = datetime.now(UTC)
-        if existing is None:
-            existing = VoiceProfileVersionDataset(
-                voice_profile_version_dataset_id=uuid.uuid4(),
-                voice_profile_version_id=voice_profile_version_id,
-                dataset_id=dataset_id,
-                dataset_name=dataset_name,
-                source_profile=source_profile,
-                sample_size=sample_size,
-                sample_scope_note=sample_scope_note,
-                created_at=now,
-                updated_at=now,
-            )
-            self.db.add(existing)
-        else:
-            existing.dataset_name = dataset_name or existing.dataset_name
-            existing.source_profile = source_profile or existing.source_profile
-            existing.sample_size = sample_size if sample_size is not None else existing.sample_size
-            existing.sample_scope_note = sample_scope_note or existing.sample_scope_note
-            existing.updated_at = now
-            self.db.add(existing)
-        return existing
+        row = VoiceProfileVersionDataset(
+            voice_profile_version_dataset_id=uuid.uuid4(),
+            voice_profile_version_id=voice_profile_version_id,
+            dataset_id=dataset.dataset_id,
+            dataset_name=dataset.dataset_name,
+            source_profile=dataset.source_profile,
+            sample_size=sample_size,
+            sample_scope_note=dataset.sample_scope_note,
+            created_at=now,
+            updated_at=now,
+        )
+        self.db.add(row)
+        return row
 
     def upsert_dataset_entry(self, **kwargs) -> DatasetEntry:
         entry_id: uuid.UUID = kwargs["entry_id"]
@@ -190,6 +264,8 @@ class VoiceProfileModuleRepository:
     def list_dataset_entries(self, dataset_id: uuid.UUID) -> list[DatasetEntry]:
         stmt = (
             select(DatasetEntry)
+            .join(VoiceProfileDataset, VoiceProfileDataset.dataset_id == DatasetEntry.dataset_id)
+            .where(VoiceProfileDataset.user_id == self.user_id)
             .where(DatasetEntry.dataset_id == dataset_id)
             .order_by(DatasetEntry.created_at.asc())
         )
@@ -198,6 +274,9 @@ class VoiceProfileModuleRepository:
     def list_version_datasets(self, voice_profile_version_id: uuid.UUID) -> list[VoiceProfileVersionDataset]:
         stmt = (
             select(VoiceProfileVersionDataset)
+            .join(VoiceProfileVersion, VoiceProfileVersion.voice_profile_version_id == VoiceProfileVersionDataset.voice_profile_version_id)
+            .join(VoiceProfile, VoiceProfile.voice_profile_id == VoiceProfileVersion.voice_profile_id)
+            .where(VoiceProfile.user_id == self.user_id)
             .where(VoiceProfileVersionDataset.voice_profile_version_id == voice_profile_version_id)
             .order_by(VoiceProfileVersionDataset.created_at.asc())
         )

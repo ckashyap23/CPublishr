@@ -4,21 +4,25 @@ from pydantic import BaseModel, Field
 
 
 class VoiceProfileCollectionCreateRequest(BaseModel):
-    voice_profile_name: str = Field(min_length=1, max_length=200)
+    collection_name: str = Field(min_length=1, max_length=200)
     platforms: list[str] = Field(min_length=1)
 
 
-class DatasetGenerateInput(BaseModel):
-    dataset_id: str | None = None
+class VoiceProfileDatasetCreateRequest(BaseModel):
     dataset_name: str = Field(min_length=1, max_length=300)
     source_profile: str | None = None
-    blob_prefix: str = Field(min_length=1, max_length=500)
+    source_type: str | None = None
+    blob_prefix: str = Field(min_length=1, max_length=1000)
     sample_scope_note: str | None = None
+
+
+class VoiceProfileCreateRequest(BaseModel):
+    voice_profile_name: str = Field(min_length=1, max_length=200)
 
 
 class VoiceProfileGenerateRequest(BaseModel):
     intended_use: str | None = None
-    datasets: list[DatasetGenerateInput] = Field(min_length=1)
+    dataset_ids: list[str] = Field(min_length=1)
 
 
 class VersionStatusUpdateRequest(BaseModel):
@@ -38,23 +42,59 @@ class VoiceProfileVersionSummary(BaseModel):
 
 
 class VoiceProfileCollectionEntity(BaseModel):
-    voice_profile_id: str
+    collection_id: str
     user_id: str
-    voice_profile_name: str
+    collection_name: str
     platforms: list[str] = Field(default_factory=list)
+    dataset_count: int = 0
+    voice_profile_count: int = 0
     created_at: str | None = None
     updated_at: str | None = None
-    latest_version: VoiceProfileVersionSummary | None = None
-    active_version: VoiceProfileVersionSummary | None = None
 
 
 class VoiceProfileCollectionDetailResponse(BaseModel):
     collection: VoiceProfileCollectionEntity
-    versions: list[VoiceProfileVersionSummary] = Field(default_factory=list)
+    datasets: list["VoiceProfileDatasetEntity"] = Field(default_factory=list)
+    voice_profiles: list["VoiceProfileEntity"] = Field(default_factory=list)
 
 
 class VoiceProfileCollectionListResponse(BaseModel):
     collections: list[VoiceProfileCollectionEntity] = Field(default_factory=list)
+
+
+class VoiceProfileDatasetEntity(BaseModel):
+    dataset_id: str
+    collection_id: str
+    user_id: str
+    dataset_name: str
+    source_profile: str | None = None
+    source_type: str | None = None
+    blob_prefix: str
+    sample_scope_note: str | None = None
+    entry_count: int = 0
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class VoiceProfileEntity(BaseModel):
+    voice_profile_id: str
+    collection_id: str
+    user_id: str
+    voice_profile_name: str
+    is_enabled: bool = True
+    latest_version: VoiceProfileVersionSummary | None = None
+    active_version: VoiceProfileVersionSummary | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class VoiceProfileDetailResponse(BaseModel):
+    voice_profile: VoiceProfileEntity
+    versions: list[VoiceProfileVersionSummary] = Field(default_factory=list)
+
+
+class VoiceProfileListResponse(BaseModel):
+    voice_profiles: list[VoiceProfileEntity] = Field(default_factory=list)
 
 
 class VoiceProfileVersionDatasetEntity(BaseModel):
@@ -100,7 +140,21 @@ class VoiceProfileVersionDetailResponse(BaseModel):
     datasets: list[VoiceProfileVersionDatasetEntity] = Field(default_factory=list)
 
 
-class VoiceProfileGenerateResponse(BaseModel):
+class VoiceProfileDatasetCreateResponse(BaseModel):
     collection: VoiceProfileCollectionEntity
-    generated_version: VoiceProfileVersionDetailResponse
+    dataset: VoiceProfileDatasetEntity
     dataset_entries_written: int
+
+
+class VoiceProfileCreateResponse(BaseModel):
+    collection: VoiceProfileCollectionEntity
+    voice_profile: VoiceProfileEntity
+
+
+class VoiceProfileGenerateResponse(BaseModel):
+    voice_profile: VoiceProfileEntity
+    generated_version: VoiceProfileVersionDetailResponse
+
+
+class VoiceProfileStatusUpdateRequest(BaseModel):
+    is_enabled: bool

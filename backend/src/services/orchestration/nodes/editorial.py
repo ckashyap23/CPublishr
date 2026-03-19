@@ -1,4 +1,4 @@
-from src.services.llm.azure_openai import AzureOpenAIClient, parse_json_object
+from src.services.llm.client import chat, is_enabled, parse_json_object
 from src.services.orchestration.contracts import NodeExecutionContext, NodeExecutionResult
 from src.services.orchestration.nodes.base import OrchestrationNode
 from src.services.storage.prompt_blob_storage import format_chat_prompt_text, save_prompt_text
@@ -6,9 +6,6 @@ from src.services.storage.prompt_blob_storage import format_chat_prompt_text, sa
 
 class EditorialNode(OrchestrationNode):
     name = "editorial"
-
-    def __init__(self, llm: AzureOpenAIClient | None = None):
-        self.llm = llm
 
     def run(self, context: NodeExecutionContext) -> NodeExecutionResult:
         p = context.input_payload
@@ -31,7 +28,7 @@ class EditorialNode(OrchestrationNode):
             f"Actions:\n" + ("\n".join([f"- {c}" for c in change_log]) or "- (none)")
         ).strip()
 
-        if self.llm and self.llm.enabled:
+        if is_enabled():
             try:
                 system_prompt = "You are an editorial assistant. Return strict JSON only."
                 user_prompt = (
@@ -49,7 +46,7 @@ class EditorialNode(OrchestrationNode):
                     suffix="editorial",
                     text=format_chat_prompt_text(system_prompt=system_prompt, user_prompt=user_prompt),
                 )
-                raw = self.llm.chat(
+                raw = chat(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=0.2,

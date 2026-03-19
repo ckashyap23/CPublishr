@@ -19,7 +19,7 @@ class VoiceProfileVersion(Base):
     voice_profile_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     voice_profile_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("voice_profile_collections.voice_profile_id"),
+        ForeignKey("voice_profiles.voice_profile_id"),
         nullable=False,
         index=True,
     )

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_current_user_id, get_db
 from src.contracts.prd import ContentVersionEntity, ContentVersionKind, ContentVersionListResponse
+from src.db.models.content_version import ContentVersion
 from src.db.repositories.content_repository import ContentRepository
 from src.schemas.workflow import VersionKeywordsPatchRequest, VersionKeywordsPatchResponse
 from src.utils.time import to_utc_iso
@@ -10,7 +11,7 @@ from src.utils.time import to_utc_iso
 router = APIRouter()
 
 
-def _to_content_version_entity(repo: ContentRepository, v) -> ContentVersionEntity:
+def _to_content_version_entity(repo: ContentRepository, v: ContentVersion) -> ContentVersionEntity:
     return ContentVersionEntity(
         version_id=v.version_id,
         project_id=v.project_id,
