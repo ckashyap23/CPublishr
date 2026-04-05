@@ -237,37 +237,37 @@ export default function GenerateArtifactsTextStyleStep({
                   <div className="grid two" style={{ marginTop: "8px" }}>
                     {card.key === "caption" ? (
                       <>
-                        <div><label>length</label><select value={adv.length || "short"} onChange={(e) => updateArtifactAdvanced("caption", "length", e.target.value)}><option value="short">short</option><option value="medium">medium</option></select></div>
-                        <div><label>emoji_density</label><select value={adv.emoji_density || "light"} onChange={(e) => updateArtifactAdvanced("caption", "emoji_density", e.target.value)}><option value="none">none</option><option value="light">light</option><option value="medium">medium</option><option value="high">high</option></select></div>
-                        <div><label>structure_hint</label><select value={adv.structure_hint || "plain"} onChange={(e) => updateArtifactAdvanced("caption", "structure_hint", e.target.value)}><option value="plain">plain</option><option value="bullet-ish">bullet-ish</option><option value="mini-story">mini-story</option></select></div>
+                        <div><label>length</label><select value={adv.length || "short"} onChange={(e) => updateArtifactAdvanced("caption", "length", e.target.value)}><option value="short">{formatOptionLabel("short")}</option><option value="medium">{formatOptionLabel("medium")}</option></select></div>
+                        <div><label>emoji_density</label><select value={adv.emoji_density || "light"} onChange={(e) => updateArtifactAdvanced("caption", "emoji_density", e.target.value)}><option value="none">{formatOptionLabel("none")}</option><option value="light">{formatOptionLabel("light")}</option><option value="medium">{formatOptionLabel("medium")}</option><option value="high">{formatOptionLabel("high")}</option></select></div>
+                        <div><label>structure_hint</label><select value={adv.structure_hint || "plain"} onChange={(e) => updateArtifactAdvanced("caption", "structure_hint", e.target.value)}><option value="plain">{formatOptionLabel("plain")}</option><option value="bullet-ish">{formatOptionLabel("bullet-ish")}</option><option value="mini-story">{formatOptionLabel("mini-story")}</option></select></div>
                       </>
                     ) : null}
                     {card.key === "post" ? (
                       <>
-                        <div><label>length</label><select value={adv.length || "medium"} onChange={(e) => updateArtifactAdvanced("post", "length", e.target.value)}><option value="short">short</option><option value="medium">medium</option><option value="long">long</option></select></div>
-                        <div><label>structure_hint</label><select value={adv.structure_hint || "framework-led"} onChange={(e) => updateArtifactAdvanced("post", "structure_hint", e.target.value)}><option value="framework-led">framework-led</option><option value="story-led">story-led</option><option value="list-led">list-led</option></select></div>
-                        <div><label>cta_strength</label><select value={adv.cta_strength || "medium"} onChange={(e) => updateArtifactAdvanced("post", "cta_strength", e.target.value)}><option value="soft">soft</option><option value="medium">medium</option><option value="strong">strong</option></select></div>
+                        <div><label>length</label><select value={adv.length || "medium"} onChange={(e) => updateArtifactAdvanced("post", "length", e.target.value)}><option value="short">{formatOptionLabel("short")}</option><option value="medium">{formatOptionLabel("medium")}</option><option value="long">{formatOptionLabel("long")}</option></select></div>
+                        <div><label>structure_hint</label><select value={adv.structure_hint || "framework-led"} onChange={(e) => updateArtifactAdvanced("post", "structure_hint", e.target.value)}><option value="framework-led">{formatOptionLabel("framework-led")}</option><option value="story-led">{formatOptionLabel("story-led")}</option><option value="list-led">{formatOptionLabel("list-led")}</option></select></div>
+                        <div><label>cta_strength</label><select value={adv.cta_strength || "medium"} onChange={(e) => updateArtifactAdvanced("post", "cta_strength", e.target.value)}><option value="soft">{formatOptionLabel("soft")}</option><option value="medium">{formatOptionLabel("medium")}</option><option value="strong">{formatOptionLabel("strong")}</option></select></div>
                       </>
                     ) : null}
                     {card.key === "newsletter" ? (
                       <>
                         <div><label>sections</label><select value={adv.sections || 4} onChange={(e) => updateArtifactAdvanced("newsletter", "sections", Number(e.target.value))}><option value={3}>3</option><option value={4}>4</option><option value={5}>5</option></select></div>
                         <div><label>takeaway_bullets</label><input type="number" min="3" max="6" value={adv.takeaway_bullets || 4} onChange={(e) => updateArtifactAdvanced("newsletter", "takeaway_bullets", Number(e.target.value))} /></div>
-                        <div><label>cta_strength</label><select value={adv.cta_strength || "medium"} onChange={(e) => updateArtifactAdvanced("newsletter", "cta_strength", e.target.value)}><option value="soft">soft</option><option value="medium">medium</option><option value="strong">strong</option></select></div>
+                        <div><label>cta_strength</label><select value={adv.cta_strength || "medium"} onChange={(e) => updateArtifactAdvanced("newsletter", "cta_strength", e.target.value)}><option value="soft">{formatOptionLabel("soft")}</option><option value="medium">{formatOptionLabel("medium")}</option><option value="strong">{formatOptionLabel("strong")}</option></select></div>
                       </>
                     ) : null}
                     {card.key === "blog" ? (
                       <>
-                        <div><label>seo_intent</label><select value={adv.seo_intent || "informational"} onChange={(e) => updateArtifactAdvanced("blog", "seo_intent", e.target.value)}><option value="informational">informational</option><option value="how-to">how-to</option><option value="comparison">comparison</option></select></div>
+                        <div><label>seo_intent</label><select value={adv.seo_intent || "informational"} onChange={(e) => updateArtifactAdvanced("blog", "seo_intent", e.target.value)}><option value="informational">{formatOptionLabel("informational")}</option><option value="how-to">{formatOptionLabel("how-to")}</option><option value="comparison">{formatOptionLabel("comparison")}</option></select></div>
                         <div><label>faq_count</label><input type="number" min="0" max="5" value={adv.faq_count ?? 3} onChange={(e) => updateArtifactAdvanced("blog", "faq_count", Number(e.target.value))} /></div>
-                        <div><label>cta_strength</label><select value={adv.cta_strength || "medium"} onChange={(e) => updateArtifactAdvanced("blog", "cta_strength", e.target.value)}><option value="soft">soft</option><option value="medium">medium</option><option value="strong">strong</option></select></div>
+                        <div><label>cta_strength</label><select value={adv.cta_strength || "medium"} onChange={(e) => updateArtifactAdvanced("blog", "cta_strength", e.target.value)}><option value="soft">{formatOptionLabel("soft")}</option><option value="medium">{formatOptionLabel("medium")}</option><option value="strong">{formatOptionLabel("strong")}</option></select></div>
                       </>
                     ) : null}
                     {card.key === "script_short" ? (
                       <>
                         <div><label>target_duration_sec</label><select value={adv.target_duration_sec || 30} onChange={(e) => updateArtifactAdvanced("script_short", "target_duration_sec", Number(e.target.value))}><option value={15}>15</option><option value={30}>30</option><option value={45}>45</option><option value={60}>60</option></select></div>
-                        <div><label>pacing</label><select value={adv.pacing || "normal"} onChange={(e) => updateArtifactAdvanced("script_short", "pacing", e.target.value)}><option value="slow">slow</option><option value="normal">normal</option><option value="fast">fast</option></select></div>
-                        <div><label>cta_strength</label><select value={adv.cta_strength || "medium"} onChange={(e) => updateArtifactAdvanced("script_short", "cta_strength", e.target.value)}><option value="soft">soft</option><option value="medium">medium</option><option value="strong">strong</option></select></div>
+                        <div><label>pacing</label><select value={adv.pacing || "normal"} onChange={(e) => updateArtifactAdvanced("script_short", "pacing", e.target.value)}><option value="slow">{formatOptionLabel("slow")}</option><option value="normal">{formatOptionLabel("normal")}</option><option value="fast">{formatOptionLabel("fast")}</option></select></div>
+                        <div><label>cta_strength</label><select value={adv.cta_strength || "medium"} onChange={(e) => updateArtifactAdvanced("script_short", "cta_strength", e.target.value)}><option value="soft">{formatOptionLabel("soft")}</option><option value="medium">{formatOptionLabel("medium")}</option><option value="strong">{formatOptionLabel("strong")}</option></select></div>
                       </>
                     ) : null}
                     {card.key === "cta_variants" ? (

@@ -1,5 +1,5 @@
 export const API_BASE_DEFAULT =
-  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8010";
+  import.meta.env.VITE_API_BASE_URL;
 
 export const TOPIC_TITLE_SUGGESTION = "A practical lesson from shipping a product with a small team";
 export const CORE_IDEA_SUGGESTION = "Small teams move faster when they reduce scope early and iterate in public.";
