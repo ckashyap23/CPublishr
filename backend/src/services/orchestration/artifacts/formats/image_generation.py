@@ -50,6 +50,9 @@ def _call_azure_dalle(
     endpoint = (settings.azure_openai_image_endpoint or settings.azure_openai_endpoint or "").rstrip("/")
     api_key = (settings.azure_openai_subscription_key or "").strip()
     api_version = settings.azure_openai_image_api_version
+    deployment_lower = deployment.lower()
+    is_gpt_image = "gpt-image" in deployment_lower
+    is_retired_dalle3 = deployment_lower == "dall-e-3" or "dall-e-3" in deployment_lower
 
     if not deployment or not endpoint or not api_key:
         missing: list[str] = []
@@ -61,16 +64,44 @@ def _call_azure_dalle(
             missing.append("AZURE_OPENAI_SUBSCRIPTION_KEY")
         return None, f"Missing Azure image configuration: {', '.join(missing)}"
 
+    if is_retired_dalle3:
+        return (
+            None,
+            "Azure image deployment 'dall-e-3' is retired as of March 4, 2026. "
+            "Update AZURE_OPENAI_IMAGE_DEPLOYMENT to a gpt-image-1 or gpt-image-1.5 deployment.",
+        )
+
+    if is_gpt_image:
+        size_map = {
+            "1792x1024": "1536x1024",
+            "1024x1792": "1024x1536",
+        }
+        normalized_size = size_map.get(size, size if size in {"1024x1024", "1536x1024", "1024x1536"} else "1024x1024")
+        normalized_quality = quality if quality in {"low", "medium", "high", "auto"} else ("high" if quality == "hd" else "medium")
+        normalized_output_format = str(response_format or "").strip().lower()
+        if normalized_output_format not in {"png", "jpeg"}:
+            normalized_output_format = "png"
+
+        body = {
+            "prompt": (prompt or "")[:32000],
+            "model": deployment,
+            "size": normalized_size,
+            "n": 1,
+            "quality": normalized_quality,
+            "output_format": normalized_output_format,
+        }
+    else:
+        body = {
+            "prompt": (prompt or "")[:DALLE_PROMPT_MAX_CHARS],
+            "size": size,
+            "n": 1,
+            "quality": quality,
+            "style": style,
+            "response_format": response_format,
+        }
+
     url = f"{endpoint}/openai/deployments/{deployment}/images/generations?api-version={api_version}"
     headers = {"api-key": api_key, "Content-Type": "application/json"}
-    body = {
-        "prompt": (prompt or "")[:DALLE_PROMPT_MAX_CHARS],
-        "size": size,
-        "n": 1,
-        "quality": quality,
-        "style": style,
-        "response_format": response_format,
-    }
 
     try:
         with httpx.Client(timeout=60.0) as client:
@@ -97,13 +128,19 @@ def connect_openai_images(*, prompt: str, output_formats: list[str], options: di
     size = str(options.get("size") or "1024x1024").strip()
     quality = str(options.get("quality") or "standard").strip().lower()
     style = str(options.get("style") or "vivid").strip().lower()
+    deployment = (settings.azure_openai_image_deployment or "").strip().lower()
+    is_gpt_image = "gpt-image" in deployment
+    requested_output_format = str((output_formats[0] if output_formats else "png") or "png").strip().lower()
+    if requested_output_format == "jpg":
+        requested_output_format = "jpeg"
+    response_or_output_format = requested_output_format if is_gpt_image else "b64_json"
 
     api_response, api_error = _call_azure_dalle(
         prompt=prompt,
         size=size if "x" in size else "1024x1024",
-        quality=quality if quality in ("standard", "hd") else "standard",
+        quality=quality if quality in ("standard", "hd", "low", "medium", "high", "auto") else "standard",
         style=style if style in ("natural", "vivid") else "vivid",
-        response_format="b64_json",
+        response_format=response_or_output_format,
     )
 
     if api_response and "data" in api_response and api_response["data"]:

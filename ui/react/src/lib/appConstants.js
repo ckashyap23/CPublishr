@@ -1,5 +1,8 @@
+// Must always be a string: undefined becomes "undefined" in fetch URLs → 404 on the dev server.
+// Empty string = same origin; use Vite proxy (see vite.config.js). Override with VITE_API_BASE_URL if needed.
+const raw = import.meta.env.VITE_API_BASE_URL;
 export const API_BASE_DEFAULT =
-  import.meta.env.VITE_API_BASE_URL;
+  typeof raw === "string" && raw.trim() !== "" ? raw.trim().replace(/\/$/, "") : "";
 
 export const TOPIC_TITLE_SUGGESTION = "A practical lesson from shipping a product with a small team";
 export const CORE_IDEA_SUGGESTION = "Small teams move faster when they reduce scope early and iterate in public.";
@@ -41,6 +44,33 @@ export const TONE_OPTIONS = ["professional", "analytical", "conversational"];
 export const STANCE_OPTIONS = ["supportive", "contrarian", "balanced"];
 export const PRIMARY_GOAL_OPTIONS = ["educate", "thought_leadership", "promote", "entertain", "recruit", "community", "convert"];
 export const DESIRED_ACTION_OPTIONS = ["comment", "share", "follow", "click", "dm", "subscribe", "buy"];
+export const DEFAULT_VOICE_PROFILE_ID = "__default_voice_profile__";
+export const DEFAULT_VOICE_PROFILE_LABEL = "Default Voice Profile";
+export const DEFAULT_VOICE_PROFILE_DETAIL = {
+  voice_profile_name: DEFAULT_VOICE_PROFILE_LABEL,
+  intended_uses: [
+    "analysis",
+    "educating",
+    "expert",
+    "professional",
+    "witty",
+    "warm and friendly",
+  ],
+  core_voice: "professional, expert, witty, warm and friendly",
+  summary:
+    "A built-in default voice for analysis, education, expert guidance, professional communication, light wit, and warm friendly delivery.",
+  do_rules: [
+    "Explain clearly and teach practically",
+    "Sound expert without sounding cold",
+    "Keep the tone professional and approachable",
+    "Use light wit only when it improves readability",
+  ],
+  dont_rules: [
+    "Do not sound robotic or overly stiff",
+    "Do not use sarcasm that weakens trust",
+    "Do not hide the main point behind filler",
+  ],
+};
 
 export const ARTIFACT_FORMAT_DISPLAY_ORDER = {
   text: [

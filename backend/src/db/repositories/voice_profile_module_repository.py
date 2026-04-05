@@ -222,6 +222,37 @@ class VoiceProfileModuleRepository:
         self.db.flush()
         return row
 
+    def create_manual_version(
+        self,
+        *,
+        voice_profile_id: uuid.UUID,
+        intended_use: str | None,
+        core_voice: str | None,
+        summary: str | None,
+        do_rules: list[str],
+        dont_rules: list[str],
+    ) -> VoiceProfileVersion:
+        style_summary = {"summary": summary.strip()} if isinstance(summary, str) and summary.strip() else {}
+        raw_profile_json = {
+            "intended_use": intended_use,
+            "core_voice": core_voice,
+            "style_summary": style_summary,
+            "tone_baseline": {},
+            "do_rules": [str(x) for x in (do_rules or []) if str(x).strip()],
+            "dont_rules": [str(x) for x in (dont_rules or []) if str(x).strip()],
+        }
+        return self.create_generated_version(
+            voice_profile_id=voice_profile_id,
+            intended_use=intended_use,
+            core_voice=core_voice,
+            style_summary=style_summary,
+            tone_baseline={},
+            do_rules=[str(x) for x in (do_rules or []) if str(x).strip()],
+            dont_rules=[str(x) for x in (dont_rules or []) if str(x).strip()],
+            raw_profile_json=raw_profile_json,
+            generation_status="approved",
+        )
+
     def add_version_dataset(
         self,
         *,

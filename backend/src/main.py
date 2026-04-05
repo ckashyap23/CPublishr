@@ -1,7 +1,9 @@
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from src.api.v1.router import api_router
 from src.core.config import settings
@@ -21,6 +23,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(api_router, prefix=settings.api_v1_prefix)
+
+
+@app.exception_handler(OperationalError)
+def handle_db_operational_error(_: Request, exc: OperationalError) -> JSONResponse:
+    logger.error("Database connection failed during request: %s", exc)
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": "Database is unavailable. Check DATABASE_URL/network access and try again."},
+    )
+
+
+@app.exception_handler(SQLAlchemyError)
+def handle_sqlalchemy_error(_: Request, exc: SQLAlchemyError) -> JSONResponse:
+    logger.error("Database request failed: %s", exc)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Database request failed."},
+    )
 
 
 @app.on_event("startup")

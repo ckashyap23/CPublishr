@@ -25,6 +25,14 @@ class VoiceProfileGenerateRequest(BaseModel):
     dataset_ids: list[str] = Field(min_length=1)
 
 
+class VoiceProfileManualVersionCreateRequest(BaseModel):
+    intended_use: str | None = None
+    core_voice: str | None = None
+    summary: str | None = None
+    do_rules: list[str] = Field(default_factory=list)
+    dont_rules: list[str] = Field(default_factory=list)
+
+
 class VersionStatusUpdateRequest(BaseModel):
     status: str = Field(min_length=1, max_length=32)
 

@@ -23,6 +23,7 @@ export default function SetupContentForm({
   STANCE_OPTIONS,
   PRIMARY_GOAL_OPTIONS,
   DESIRED_ACTION_OPTIONS,
+  approvedActiveVoiceProfileOptions,
   platformTargets,
   toggleTarget,
   userContentTextareaRef,
@@ -84,6 +85,20 @@ export default function SetupContentForm({
             {DESIRED_ACTION_OPTIONS.map((x) => <option key={x} value={x}>{formatOptionLabel(x)}</option>)}
           </select>
         </div>
+        <div>
+          <LabelWithTooltip text="Voice Profile" required tooltip="Choose the approved voice profile that should define the writing style for this project." />
+          <select value={form.voice_profile_id} onChange={(e) => setForm({ ...form, voice_profile_id: e.target.value })}>
+            <option value="">Select voice profile</option>
+            {approvedActiveVoiceProfileOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+          {!approvedActiveVoiceProfileOptions.length ? (
+            <p className="note" style={{ marginTop: "6px" }}>
+              No approved voice profiles are available yet. Create or approve one in Settings first.
+            </p>
+          ) : null}
+        </div>
         <div style={{ gridColumn: "1 / -1" }}>
           <LabelWithTooltip text="Distribution Targets" tooltip="Where you might publish this. This doesn't change the core idea-just helps us prepare formats that fit those platforms later." />
           <div className="row">
@@ -107,18 +122,23 @@ export default function SetupContentForm({
         </div>
       </div>
       <div className="row" style={{ marginTop: "12px" }}>
-        <button type="button" className="primary" disabled={busy || isCheckingProjectData || !canGenerateContent} onClick={onGenerateContent}>
-          {isGenerating ? "Generating..." : "Generate Content"}
+        <button
+          type="button"
+          className={canContinueToEditorial ? "secondary" : "primary"}
+          disabled={busy || isCheckingProjectData || !canGenerateContent}
+          onClick={onGenerateContent}
+        >
+          {isGenerating ? "Generating content..." : "Generate Content"}
         </button>
         {canContinueToEditorial ? (
-          <button className="secondary" disabled={busy} onClick={() => setPage("editorial")}>
-            Continue to Editorial
+          <button className="primary" disabled={busy} onClick={() => setPage("editorial")}>
+            Go to Editorial
           </button>
         ) : null}
       </div>
       {(isGenerating || nodeAudit.length > 0) ? (
         <div style={{ marginTop: "14px" }}>
-          <h3>Workflow Audit (Node 0-2)</h3>
+          <h3>Workflow Progress</h3>
           <div className="chat">
             {nodeAudit.map((entry, idx) => (
               <div key={`${entry.node}-${idx}`} className="msg">
@@ -131,7 +151,7 @@ export default function SetupContentForm({
                     {JSON.stringify(entry.output, null, 2)}
                   </pre>
                 ) : (
-                  <div className="note">Running...</div>
+                  <div className="note">In progress...</div>
                 )}
               </div>
             ))}

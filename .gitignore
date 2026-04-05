@@ -7,6 +7,12 @@ __pycache__/
 .venv/
 backend/.venv/
 .venv-ui/
+backend/.venv-bootstrap/
+backend/.venv.broken-*/
+
+# generated artifact outputs (local runs)
+backend/src/services/orchestration/artifacts/formats/text/
+backend/src/services/orchestration/artifacts/formats/images/
 
 # env
 .env

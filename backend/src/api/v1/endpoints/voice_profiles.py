@@ -28,6 +28,7 @@ from src.schemas.voice_profiles import (
     VoiceProfileGenerateRequest,
     VoiceProfileGenerateResponse,
     VoiceProfileListResponse,
+    VoiceProfileManualVersionCreateRequest,
     VoiceProfileStatusUpdateRequest,
     VoiceProfileVersionDatasetEntity,
     VoiceProfileVersionDetailResponse,
@@ -313,6 +314,59 @@ def generate_version(
             status_code=500,
             detail=f"Unexpected error during voice profile generation: {exc.__class__.__name__}: {str(exc)}",
         ) from exc
+
+    repo = VoiceProfileModuleRepository(db, user_id=user_id)
+    versions = repo.list_versions(voice_profile_uuid)
+    datasets = repo.list_version_datasets(version.voice_profile_version_id)
+    return VoiceProfileGenerateResponse(
+        voice_profile=_to_voice_profile_entity(voice_profile, versions),
+        generated_version=VoiceProfileVersionDetailResponse(
+            version=_to_version_summary(version),
+            raw_profile_json=version.raw_profile_json or {},
+            style_summary=version.style_summary or {},
+            tone_baseline=version.tone_baseline or {},
+            do_rules=[str(x) for x in (version.do_rules or [])],
+            dont_rules=[str(x) for x in (version.dont_rules or [])],
+            datasets=[
+                VoiceProfileVersionDatasetEntity(
+                    voice_profile_version_dataset_id=str(d.voice_profile_version_dataset_id),
+                    voice_profile_version_id=str(d.voice_profile_version_id),
+                    dataset_id=str(d.dataset_id),
+                    dataset_name=d.dataset_name,
+                    source_profile=d.source_profile,
+                    sample_size=d.sample_size,
+                    sample_scope_note=d.sample_scope_note,
+                    created_at=to_utc_iso(d.created_at) if d.created_at else None,
+                    updated_at=to_utc_iso(d.updated_at) if d.updated_at else None,
+                )
+                for d in datasets
+            ],
+        ),
+    )
+
+
+@router.post("/profiles/{voice_profile_id}/versions/manual", response_model=VoiceProfileGenerateResponse)
+def create_manual_version(
+    voice_profile_id: str,
+    payload: VoiceProfileManualVersionCreateRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> VoiceProfileGenerateResponse:
+    voice_profile_uuid = _parse_uuid(voice_profile_id, "voice_profile_id")
+    svc = VoiceProfileModuleService(db, user_id=user_id)
+    try:
+        voice_profile, version = svc.create_manual_version(
+            voice_profile_id=voice_profile_uuid,
+            intended_use=payload.intended_use,
+            core_voice=payload.core_voice,
+            summary=payload.summary,
+            do_rules=payload.do_rules,
+            dont_rules=payload.dont_rules,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     repo = VoiceProfileModuleRepository(db, user_id=user_id)
     versions = repo.list_versions(voice_profile_uuid)

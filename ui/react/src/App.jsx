@@ -9,6 +9,9 @@ import {
   AUDIENCE_FAMILIARITY_OPTIONS,
   AUDIENCE_OPTIONS,
   CORE_IDEA_SUGGESTION,
+  DEFAULT_VOICE_PROFILE_DETAIL,
+  DEFAULT_VOICE_PROFILE_ID,
+  DEFAULT_VOICE_PROFILE_LABEL,
   DESIRED_ACTION_OPTIONS,
   DETAIL_LEVEL_OPTIONS,
   FORMAT_ADVANCED_DEFAULTS,
@@ -199,7 +202,14 @@ export default function App() {
   });
   const [isVpPickingLocalDatasetPath, setIsVpPickingLocalDatasetPath] = useState(false);
   const [vpDatasetLocalFiles, setVpDatasetLocalFiles] = useState([]);
-  const [vpProfileForm, setVpProfileForm] = useState({ voice_profile_name: "", intended_use: "" });
+  const [vpProfileForm, setVpProfileForm] = useState({
+    voice_profile_name: "",
+    intended_use: "",
+    core_voice: "",
+    summary: "",
+    do_rules_text: "",
+    dont_rules_text: "",
+  });
   const [vpGenerateForm, setVpGenerateForm] = useState({
     intended_use: "",
     dataset_ids: [],
@@ -253,9 +263,9 @@ export default function App() {
     [selectedVoiceProfiles]
   );
   const vpSelectedProfileSummary = useMemo(() => {
-    const profiles = Array.isArray(vpCollectionDetail?.voice_profiles) ? vpCollectionDetail.voice_profiles : [];
+    const profiles = Array.isArray(vpProfilesIndex) ? vpProfilesIndex : [];
     return profiles.find((p) => p.voice_profile_id === vpSelectedProfileId) || null;
-  }, [vpCollectionDetail, vpSelectedProfileId]);
+  }, [vpProfilesIndex, vpSelectedProfileId]);
   const topBannerMessage = useMemo(() => {
     if (page === "settings") {
       return "";
@@ -363,6 +373,31 @@ export default function App() {
         };
       });
   }, [vpProfilesIndex]);
+  const setupVoiceProfileOptions = useMemo(() => {
+    const persisted = vpProfilesIndex
+      .map((p) => {
+        const active = p?.active_version || null;
+        const latest = p?.latest_version || null;
+        const name = String(p.voice_profile_name || p.voice_profile_id || "").trim();
+        const selectedVersion = active || latest || null;
+        const versionNo = selectedVersion?.version_no ?? "-";
+        const status = String(selectedVersion?.generation_status || "").trim().toLowerCase();
+        const statusLabel = active
+          ? `active ${status || "version"}`
+          : latest
+            ? status || "latest version"
+            : "no version yet";
+        return {
+          value: p.voice_profile_id,
+          label: `${name} (v${versionNo}, ${statusLabel})`,
+        };
+      })
+      .filter(Boolean);
+    return [
+      { value: DEFAULT_VOICE_PROFILE_ID, label: DEFAULT_VOICE_PROFILE_LABEL },
+      ...persisted,
+    ];
+  }, [vpProfilesIndex]);
   const projectHasSavedVoiceProfileOption = useMemo(() => {
     const currentVoiceProfileId = String(form.voice_profile_id || "").trim();
     if (!currentVoiceProfileId) return false;
@@ -432,11 +467,13 @@ export default function App() {
     [publishPlatforms]
   );
   const canGenerateContent = useMemo(() => {
+    const projectName = String(form.project_id || "").trim();
     const topicTitle = String(form.topic_title || "").trim();
     const coreIdea = String(form.core_idea || "").trim();
     const targetAudience = String(form.target_audience_segment || "").trim();
     const tonePreference = String(form.tone_preference || "").trim();
-    return !!(topicTitle && coreIdea && targetAudience && tonePreference);
+    const voiceProfileId = String(form.voice_profile_id || "").trim();
+    return !!(projectName && topicTitle && coreIdea && targetAudience && tonePreference && voiceProfileId);
   }, [form]);
   const canGenerateArtifactsNow = useMemo(() => {
     if (!selectedArtifactFormats.length) return false;
@@ -500,7 +537,7 @@ async function refreshVersions(projectId, preferredVersion) {
   async function openEditorialForProject(projectId) {
     const normalizedProjectId = String(projectId || "").trim();
     if (!normalizedProjectId) {
-      setError("Project ID is required.");
+      setError("Project Name is required.");
       return;
     }
     setError("");
@@ -613,6 +650,10 @@ async function refreshVersions(projectId, preferredVersion) {
   function onNewProjectIdChange(nextProjectId) {
     setHasManuallyEditedProjectId(true);
     setIsCreatingNewProject(true);
+    setError("");
+    setMessage("");
+    setHasExistingContent(false);
+    setShowGenerateSetupForm(false);
     setForm((prev) => ({ ...prev, project_id: nextProjectId }));
   }
 
@@ -630,8 +671,30 @@ async function refreshVersions(projectId, preferredVersion) {
     setIsCreatingNewProject(true);
     setForm((prev) => ({ ...prev, project_id: "" }));
     setHasExistingContent(false);
-    setShowGenerateSetupForm(true);
+    setShowGenerateSetupForm(false);
     setPage("setup");
+  }
+
+  function onConfirmNewProject() {
+    const projectName = String(form.project_id || "").trim();
+    if (!projectName) {
+      setError("Project Name is required.");
+      return;
+    }
+    const normalized = projectName.toLowerCase();
+    const duplicate = (Array.isArray(userProjects) ? userProjects : []).some(
+      (project) => String(project?.project_id || "").trim().toLowerCase() === normalized
+    );
+    if (duplicate) {
+      setError("A project with this name already exists. Choose another name or select it from the list.");
+      setHasExistingContent(true);
+      setShowGenerateSetupForm(false);
+      return;
+    }
+    setError("");
+    setMessage("");
+    setHasExistingContent(false);
+    setShowGenerateSetupForm(true);
   }
 
   function onSelectVpCollection(collectionId) {
@@ -1248,6 +1311,74 @@ async function refreshVersions(projectId, preferredVersion) {
     }
   }
 
+  async function ensureVpDefaultCollectionId() {
+    const currentSelected = String(vpSelectedCollectionId || "").trim();
+    if (currentSelected) return currentSelected;
+    const existingCollections = Array.isArray(vpCollections) ? vpCollections : [];
+    if (existingCollections.length) {
+      const firstCollectionId = String(existingCollections[0]?.collection_id || "").trim();
+      if (firstCollectionId) {
+        setVpSelectedCollectionId(firstCollectionId);
+        return firstCollectionId;
+      }
+    }
+    const out = await vpRequest("POST", "/api/v1/voice-profiles/collections", {
+      collection_name: "Voice Profiles",
+      platforms: ["linkedin"],
+    });
+    const newId = String(out?.collection?.collection_id || "").trim();
+    await loadVpCollections(newId);
+    return newId;
+  }
+
+  async function onVpCreateProfile() {
+    const profileName = String(vpProfileForm.voice_profile_name || "").trim();
+    if (!profileName) {
+      setError("Voice profile name is required.");
+      return;
+    }
+    setError("");
+    setMessage("");
+    setBusy(true);
+    try {
+      const targetCollectionId = await ensureVpDefaultCollectionId();
+      const out = await vpRequest("POST", `/api/v1/voice-profiles/collections/${targetCollectionId}/profiles`, {
+        voice_profile_name: profileName,
+      });
+      const createdProfileId = String(out?.voice_profile?.voice_profile_id || "").trim();
+      const splitRules = (value) =>
+        String(value || "")
+          .split(/\r?\n|,/)
+          .map((item) => item.trim())
+          .filter(Boolean);
+      if (createdProfileId) {
+        const manualVersionOut = await vpRequest("POST", `/api/v1/voice-profiles/profiles/${createdProfileId}/versions/manual`, {
+          intended_use: (vpProfileForm.intended_use || "").trim() || null,
+          core_voice: (vpProfileForm.core_voice || "").trim() || null,
+          summary: (vpProfileForm.summary || "").trim() || null,
+          do_rules: splitRules(vpProfileForm.do_rules_text),
+          dont_rules: splitRules(vpProfileForm.dont_rules_text),
+        });
+        const createdVersionId = String(manualVersionOut?.generated_version?.version?.voice_profile_version_id || "").trim();
+        if (createdVersionId) {
+          setVpSelectedVersionId(createdVersionId);
+        }
+      }
+      await loadVpCollections(targetCollectionId);
+      await loadVpCollectionDetail(targetCollectionId);
+      if (createdProfileId) {
+        await loadVpProfileDetail(createdProfileId);
+        setVpSelectedProfileId(createdProfileId);
+        setVpProfileComposerMode("existing");
+      }
+      setMessage("Voice profile saved.");
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onVpActivateVersion() {
     if (!vpSelectedVersionId) return;
     setError("");
@@ -1405,9 +1536,13 @@ async function refreshVersions(projectId, preferredVersion) {
   }
 
   function buildTopicPayload() {
+    const projectName = (form.project_id || "").trim();
     const topicTitle = (form.topic_title || "").trim();
     const coreIdea = (form.core_idea || "").trim();
     const voiceProfileId = (form.voice_profile_id || "").trim();
+    if (!projectName) {
+      throw new Error("Project Name is required.");
+    }
     if (!topicTitle) {
       throw new Error("Topic Title is required.");
     }
@@ -1418,7 +1553,7 @@ async function refreshVersions(projectId, preferredVersion) {
       throw new Error("Voice Profile ID is required.");
     }
     return {
-      project_id: (form.project_id || "").trim(),
+      project_id: projectName,
       topic_title: topicTitle,
       core_idea: coreIdea,
       user_content: (form.user_content || "").trim() || null,
@@ -1552,7 +1687,7 @@ async function refreshVersions(projectId, preferredVersion) {
 
       await refreshVersions(form.project_id);
       loadUserProjects().catch(() => {});
-      setMessage("Node 0-2 completed. Review audit output below, then continue to editorial.");
+      setMessage("Content is ready. Review the workflow progress below, then go to Editorial.");
       setCanContinueToEditorial(true);
     } catch (e) {
       setNodeAudit((prev) => {
@@ -2035,7 +2170,7 @@ async function refreshVersions(projectId, preferredVersion) {
     setPublishSaveMessage("");
     const projectId = String(form.project_id || "").trim();
     const platform = String(publishSelectedPlatform || "").trim();
-    if (!projectId) { setError("Project ID is required."); return; }
+    if (!projectId) { setError("Project Name is required."); return; }
     if (!platform) { setError("Select a platform first."); return; }
     const userName = String(publishSaveUserName || "").trim();
     if (!userName) { setError("Name is required."); return; }
@@ -2475,9 +2610,13 @@ async function refreshVersions(projectId, preferredVersion) {
 
   useEffect(() => {
     if (!isAuthenticated) return;
+    if (isCreatingNewProject) {
+      setIsCheckingProjectData(false);
+      return;
+    }
     const projectId = (form.project_id || "").trim();
     checkExistingContent(projectId);
-  }, [form.project_id, apiBaseUrl, isAuthenticated]);
+  }, [form.project_id, apiBaseUrl, isAuthenticated, isCreatingNewProject]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -2536,6 +2675,15 @@ async function refreshVersions(projectId, preferredVersion) {
     }
     loadVpCollections().catch(() => {});
   }, [authToken, apiBaseUrl]);
+
+  useEffect(() => {
+    if (!setupVoiceProfileOptions.length) return;
+    setForm((prev) => {
+      const currentVoiceProfileId = String(prev.voice_profile_id || "").trim();
+      if (currentVoiceProfileId) return prev;
+      return { ...prev, voice_profile_id: setupVoiceProfileOptions[0].value };
+    });
+  }, [setupVoiceProfileOptions]);
 
   useEffect(() => {
     if (!authToken) return;
@@ -2700,13 +2848,25 @@ async function refreshVersions(projectId, preferredVersion) {
           ) : (
             <>
               <div>
-                <label>Project ID</label>
+                <label>Project Name</label>
                 {isCreatingNewProject ? (
-                  <input
-                    value={form.project_id}
-                    onChange={(e) => onNewProjectIdChange(e.target.value)}
-                    placeholder="Enter a new project ID"
-                  />
+                  <>
+                    <input
+                      value={form.project_id}
+                      onChange={(e) => onNewProjectIdChange(e.target.value)}
+                      placeholder="Enter a new project name"
+                    />
+                    <div className="row" style={{ marginTop: "8px" }}>
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={busy || !String(form.project_id || "").trim()}
+                        onClick={onConfirmNewProject}
+                      >
+                        Create Project
+                      </button>
+                    </div>
+                  </>
                 ) : (
                   <div className="project-id-inline">{form.project_id || "-"}</div>
                 )}
@@ -2724,9 +2884,6 @@ async function refreshVersions(projectId, preferredVersion) {
                       Generate Content
                     </button>
                   </div>
-                ) : null}
-                {page === "setup" && isCheckingProjectData ? (
-                  <p className="note" style={{ marginTop: "6px" }}>Checking project data...</p>
                 ) : null}
               </div>
               <div className="workflow-steps-block">
@@ -2778,7 +2935,7 @@ async function refreshVersions(projectId, preferredVersion) {
               <div style={{ marginTop: "10px" }}>
                 <div className="progress-label">
                   {isGenerating
-                    ? `Generating content (Node 0-2): ${nodeProgress}%`
+                    ? `Generating your content: ${nodeProgress}%`
                     : (isArtifactGenerating ? "Generating artifacts..." : "Loading stored artifacts...")}
                 </div>
                 {isArtifactGenerating && selectedArtifactFormats.some((f) => ["post_image","thumbnail","banner","cover"].includes(f)) && (
@@ -2818,6 +2975,7 @@ async function refreshVersions(projectId, preferredVersion) {
         STANCE_OPTIONS={STANCE_OPTIONS}
         PRIMARY_GOAL_OPTIONS={PRIMARY_GOAL_OPTIONS}
         DESIRED_ACTION_OPTIONS={DESIRED_ACTION_OPTIONS}
+        approvedActiveVoiceProfileOptions={setupVoiceProfileOptions}
         platformTargets={platformTargets}
         toggleTarget={toggleTarget}
         userContentTextareaRef={userContentTextareaRef}
@@ -2827,6 +2985,8 @@ async function refreshVersions(projectId, preferredVersion) {
         active={isAuthenticated && page === "settings"}
         busy={busy}
         authToken={authToken}
+        defaultVoiceProfileDetail={DEFAULT_VOICE_PROFILE_DETAIL}
+        vpProfilesIndex={vpProfilesIndex}
         showVpCreateCollectionForm={showVpCreateCollectionForm}
         setShowVpCreateCollectionForm={setShowVpCreateCollectionForm}
         vpCreateForm={vpCreateForm}
@@ -2846,6 +3006,7 @@ async function refreshVersions(projectId, preferredVersion) {
         isVpPickingLocalDatasetPath={isVpPickingLocalDatasetPath}
         pickVpDatasetPath={pickVpDatasetPath}
         onVpCreateDataset={onVpCreateDataset}
+        onVpCreateProfile={onVpCreateProfile}
         vpCollectionDetail={vpCollectionDetail}
         hasSelectedActiveVoiceProfiles={hasSelectedActiveVoiceProfiles}
         hasSelectedInactiveVoiceProfiles={hasSelectedInactiveVoiceProfiles}
