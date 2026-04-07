@@ -2,6 +2,8 @@ export default function VoiceProfilesSettings({
   active,
   busy,
   authToken,
+  defaultVoiceProfileDetail,
+  vpProfilesIndex,
   showVpCreateCollectionForm,
   setShowVpCreateCollectionForm,
   vpCreateForm,
@@ -21,6 +23,7 @@ export default function VoiceProfilesSettings({
   isVpPickingLocalDatasetPath,
   pickVpDatasetPath,
   onVpCreateDataset,
+  onVpCreateProfile,
   vpCollectionDetail,
   hasSelectedActiveVoiceProfiles,
   hasSelectedInactiveVoiceProfiles,
@@ -53,6 +56,11 @@ export default function VoiceProfilesSettings({
 }) {
   if (!active) return null;
 
+  const profileList = Array.isArray(vpProfilesIndex) ? vpProfilesIndex : [];
+  const versionSummary = vpVersionDetail?.style_summary?.summary || "Not specified";
+  const versionDoRules = Array.isArray(vpVersionDetail?.do_rules) ? vpVersionDetail.do_rules : [];
+  const versionDontRules = Array.isArray(vpVersionDetail?.dont_rules) ? vpVersionDetail.dont_rules : [];
+
   return (
     <>
       <div className="card">
@@ -62,181 +70,78 @@ export default function VoiceProfilesSettings({
         ) : null}
       </div>
 
-      <div className="card">
-        <div className="row" style={{ justifyContent: "space-between", marginBottom: "10px" }}>
-          <h3 style={{ margin: 0 }}>Collections</h3>
-          {showVpCreateCollectionForm ? (
-            <button
-              className="secondary"
-              disabled={busy || !authToken}
-              onClick={() => {
-                setShowVpCreateCollectionForm(false);
-                setVpCreateForm({ collection_name: "", platforms: ["linkedin"] });
-              }}
-            >
-              Cancel
-            </button>
-          ) : (
-            <button className="secondary" disabled={busy || !authToken} onClick={() => setShowVpCreateCollectionForm(true)}>Create Collection</button>
-          )}
-        </div>
-        {showVpCreateCollectionForm ? (
-          <>
-            <div className="grid two">
-              <div>
-                <label>Collection Name</label>
-                <input
-                  value={vpCreateForm.collection_name}
-                  onChange={(e) => setVpCreateForm((prev) => ({ ...prev, collection_name: e.target.value }))}
-                />
-              </div>
-              <div>
-                <label>Platforms</label>
-                <div className="row">
-                  {platformTargets.map((p) => (
-                    <label key={`vp-platform-${p}`} className="tag">
-                      <input
-                        type="checkbox"
-                        checked={(vpCreateForm.platforms || []).includes(p)}
-                        onChange={() => toggleVpPlatform(p)}
-                        style={{ width: "auto", marginRight: "6px" }}
-                      />
-                      {p}
-                    </label>
-                  ))}
-                </div>
-              </div>
+      {defaultVoiceProfileDetail ? (
+        <div className="card">
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", marginBottom: "10px" }}>
+            <div>
+              <h3 style={{ margin: 0 }}>{defaultVoiceProfileDetail.voice_profile_name}</h3>
+              <p className="note" style={{ marginTop: "6px" }}>
+                Built-in fallback profile used when no saved voice profile is selected.
+              </p>
             </div>
-            <div className="row" style={{ marginTop: "10px" }}>
-              <button className="primary" disabled={busy || !authToken} onClick={onVpCreateCollection}>Create Collection</button>
-            </div>
-          </>
-        ) : (
-          <>
-            {vpCollections.length === 0 ? <p className="note">No voice profile collections found.</p> : null}
-            <div className="row">
-              {vpCollections.map((c) => (
-                <button
-                  key={c.collection_id}
-                  className={vpSelectedCollectionId === c.collection_id ? "primary" : "secondary"}
-                  onClick={() => onSelectVpCollection(c.collection_id)}
-                >
-                  {c.collection_name}
-                </button>
+            <span className="vp-profile-status-pill vp-profile-status-pill-success">Built-in</span>
+          </div>
+          <div style={{ marginBottom: "10px" }}>
+            <label>Intended Use</label>
+            <div className="row" style={{ marginTop: "8px" }}>
+              {(defaultVoiceProfileDetail.intended_uses || []).map((use) => (
+                <span key={use} className="tag">{use}</span>
               ))}
             </div>
-            {vpSelectedCollectionId ? (
-              <p className="note" style={{ marginTop: "8px" }}>Selected collection id: {vpSelectedCollectionId}</p>
-            ) : null}
-          </>
-        )}
-      </div>
-
-      {vpSelectedCollectionId ? (
-        <div className="card">
-          <div className="row" style={{ justifyContent: "space-between", marginBottom: "10px" }}>
-            <h3 style={{ margin: 0 }}>Collection Datasets</h3>
           </div>
-          <div className="grid two">
-            <div className="card" style={{ marginBottom: 0 }}>
-              <h3 style={{ marginTop: 0 }}>Upload Dataset</h3>
-              <div style={{ marginBottom: "10px" }}>
-                <label>Dataset Source</label>
-                <select
-                  value={vpDatasetSourceMode}
-                  onChange={(e) => {
-                    const next = String(e.target.value || "azure");
-                    setVpDatasetSourceMode(next === "local" ? "local" : "azure");
-                    window.localStorage.setItem("cpublishr_vp_dataset_source_mode", next === "local" ? "local" : "azure");
-                  }}
-                >
-                  <option value="azure">Azure Blob Storage</option>
-                  <option value="local">Local File Path</option>
-                </select>
-              </div>
-              <div className="grid two">
-                <div>
-                  <label>Dataset Name</label>
-                  <input value={vpDatasetForm.dataset_name} onChange={(e) => setVpDatasetForm((prev) => ({ ...prev, dataset_name: e.target.value }))} />
-                </div>
-                <div>
-                  <label>Source Profile (optional)</label>
-                  <input value={vpDatasetForm.source_profile} onChange={(e) => setVpDatasetForm((prev) => ({ ...prev, source_profile: e.target.value }))} />
-                </div>
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <label>{vpDatasetSourceMode === "local" ? "Local File Selection" : "Azure Source Path"}</label>
-                  <input
-                    value={vpDatasetForm.blob_prefix}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setVpDatasetForm((prev) => ({ ...prev, blob_prefix: next }));
-                      if (vpDatasetSourceMode === "local") setVpDatasetLocalFiles([]);
-                    }}
-                    placeholder={
-                      vpDatasetSourceMode === "local"
-                        ? "Use Browse Local Path to pick one or more files"
-                        : "azure://profile-entries/user_id/dataset_name/ OR full blob URL OR container-relative prefix"
-                    }
-                  />
-                  {vpDatasetSourceMode === "local" ? (
-                    <div className="row" style={{ marginTop: "8px" }}>
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={busy || isVpPickingLocalDatasetPath}
-                        onClick={() => pickVpDatasetPath("files")}
-                      >
-                        {isVpPickingLocalDatasetPath ? "Opening..." : "Browse Local Path"}
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-              <div style={{ marginTop: "8px" }}>
-                <label>Sample Scope Note (optional)</label>
-                <textarea value={vpDatasetForm.sample_scope_note} onChange={(e) => setVpDatasetForm((prev) => ({ ...prev, sample_scope_note: e.target.value }))} />
-              </div>
-              <p className="note" style={{ marginTop: "8px" }}>
-                {vpDatasetSourceMode === "local"
-                  ? `Select one or more local files on the backend machine.${vpDatasetLocalFiles.length ? ` ${vpDatasetLocalFiles.length} file(s) selected.` : ""}`
-                  : "Use azure://container/prefix, a full Azure blob URL, or a container-relative prefix."}
-              </p>
-              <div className="row" style={{ marginTop: "10px" }}>
-                <button className="primary" disabled={busy || !authToken || !vpSelectedCollectionId} onClick={onVpCreateDataset}>Upload Dataset</button>
-              </div>
+          <div style={{ marginBottom: "10px" }}>
+            <label>Core Voice</label>
+            <div className="note" style={{ marginTop: "6px", fontSize: "14px" }}>
+              {defaultVoiceProfileDetail.core_voice}
             </div>
-
-            <div className="card" style={{ marginBottom: 0 }}>
-              <h3 style={{ marginTop: 0 }}>Saved Datasets</h3>
-              {!vpCollectionDetail?.datasets?.length ? <p className="note">No datasets uploaded yet.</p> : null}
-              <div className="row">
-                {(vpCollectionDetail?.datasets || []).map((d) => (
-                  <span key={d.dataset_id} className="tag">
-                    {d.dataset_name} ({d.entry_count || 0})
-                  </span>
-                ))}
-              </div>
+          </div>
+          <div style={{ marginBottom: "10px" }}>
+            <label>Summary</label>
+            <div className="note" style={{ marginTop: "6px", fontSize: "14px" }}>
+              {defaultVoiceProfileDetail.summary}
+            </div>
+          </div>
+          <div style={{ marginBottom: "10px" }}>
+            <label>Do Rules</label>
+            <div className="row" style={{ marginTop: "8px" }}>
+              {(defaultVoiceProfileDetail.do_rules || []).map((rule) => (
+                <span key={rule} className="tag">{rule}</span>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label>Don't Rules</label>
+            <div className="row" style={{ marginTop: "8px" }}>
+              {(defaultVoiceProfileDetail.dont_rules || []).map((rule) => (
+                <span key={rule} className="tag">{rule}</span>
+              ))}
             </div>
           </div>
         </div>
       ) : null}
 
-      {vpSelectedCollectionId ? (
-        <div className="card">
-          <h3 style={{ marginTop: 0 }}>Collection Voice Profiles</h3>
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Saved Voice Profiles</h3>
           <div className="card" style={{ marginTop: "12px", marginBottom: 0 }}>
             <div className="row" style={{ justifyContent: "space-between", marginBottom: "10px" }}>
               <h3 style={{ marginTop: 0, marginBottom: 0 }}>Existing Voice Profiles</h3>
               <div className="row">
                 <button
                   className="secondary"
-                  disabled={busy || !authToken || !vpSelectedCollectionId}
+                  disabled={busy || !authToken}
                   onClick={() => {
                     setVpSelectedProfileId("");
                     setVpProfileDetail(null);
                     setVpSelectedVersionId("");
                     setVpVersionDetail(null);
-                    setVpProfileForm({ voice_profile_name: "", intended_use: "" });
+                    setVpProfileForm({
+                      voice_profile_name: "",
+                      intended_use: "",
+                      core_voice: "",
+                      summary: "",
+                      do_rules_text: "",
+                      dont_rules_text: "",
+                    });
                     setVpGenerateForm((prev) => ({ ...prev, dataset_ids: [] }));
                     setVpProfileComposerMode("create");
                   }}
@@ -260,9 +165,9 @@ export default function VoiceProfilesSettings({
                 ) : null}
               </div>
             </div>
-            {!vpCollectionDetail?.voice_profiles?.length ? <p className="note">No voice profiles generated yet.</p> : null}
+            {!profileList.length ? <p className="note">No saved voice profiles yet.</p> : null}
             <div className="vp-profile-tag-grid">
-              {(vpCollectionDetail?.voice_profiles || []).map((p) => (
+              {profileList.map((p) => (
                 <div
                   key={p.voice_profile_id}
                   className={[
@@ -282,7 +187,14 @@ export default function VoiceProfilesSettings({
                     className="vp-profile-tag-button"
                     onClick={() => {
                       setVpSelectedProfileId(p.voice_profile_id);
-                      setVpProfileForm((prev) => ({ ...prev, voice_profile_name: p.voice_profile_name, intended_use: "" }));
+                      setVpProfileForm({
+                        voice_profile_name: p.voice_profile_name,
+                        intended_use: vpVersionDetail?.version?.intended_use || "",
+                        core_voice: vpVersionDetail?.version?.core_voice || "",
+                        summary: vpVersionDetail?.style_summary?.summary || "",
+                        do_rules_text: Array.isArray(vpVersionDetail?.do_rules) ? vpVersionDetail.do_rules.join("\n") : "",
+                        dont_rules_text: Array.isArray(vpVersionDetail?.dont_rules) ? vpVersionDetail.dont_rules.join("\n") : "",
+                      });
                       setVpGenerateForm((prev) => ({ ...prev, dataset_ids: [] }));
                       setVpProfileComposerMode("existing");
                     }}
@@ -334,25 +246,40 @@ export default function VoiceProfilesSettings({
                       <input
                         value={vpProfileForm.intended_use}
                         onChange={(e) => setVpProfileForm((prev) => ({ ...prev, intended_use: e.target.value }))}
-                        placeholder="drafting / analysis / coaching"
+                        placeholder="Optional"
                       />
                     </div>
                     <div style={{ marginTop: "12px" }}>
-                      <label>Select Existing Datasets</label>
-                      {!vpCollectionDetail?.datasets?.length ? <p className="note">Upload at least one dataset first.</p> : null}
-                      <div className="row" style={{ marginTop: "8px" }}>
-                        {(vpCollectionDetail?.datasets || []).map((d) => (
-                          <label key={d.dataset_id} className="tag">
-                            <input
-                              type="checkbox"
-                              checked={(vpGenerateForm.dataset_ids || []).includes(d.dataset_id)}
-                              onChange={() => toggleVpGenerateDataset(d.dataset_id)}
-                              style={{ width: "auto", marginRight: "6px" }}
-                            />
-                            {d.dataset_name} ({d.entry_count || 0})
-                          </label>
-                        ))}
-                      </div>
+                      <label>Core Voice</label>
+                      <textarea
+                        value={vpProfileForm.core_voice}
+                        onChange={(e) => setVpProfileForm((prev) => ({ ...prev, core_voice: e.target.value }))}
+                        placeholder="Describe the voice in a short phrase or sentence"
+                      />
+                    </div>
+                    <div style={{ marginTop: "12px" }}>
+                      <label>Summary</label>
+                      <textarea
+                        value={vpProfileForm.summary}
+                        onChange={(e) => setVpProfileForm((prev) => ({ ...prev, summary: e.target.value }))}
+                        placeholder="High-level summary of how this voice should sound"
+                      />
+                    </div>
+                    <div style={{ marginTop: "12px" }}>
+                      <label>Dos</label>
+                      <textarea
+                        value={vpProfileForm.do_rules_text}
+                        onChange={(e) => setVpProfileForm((prev) => ({ ...prev, do_rules_text: e.target.value }))}
+                        placeholder="One rule per line"
+                      />
+                    </div>
+                    <div style={{ marginTop: "12px" }}>
+                      <label>Don'ts</label>
+                      <textarea
+                        value={vpProfileForm.dont_rules_text}
+                        onChange={(e) => setVpProfileForm((prev) => ({ ...prev, dont_rules_text: e.target.value }))}
+                        placeholder="One rule per line"
+                      />
                     </div>
                     <div className="row" style={{ marginTop: "12px" }}>
                       <button
@@ -363,7 +290,14 @@ export default function VoiceProfilesSettings({
                           setVpProfileDetail(null);
                           setVpSelectedVersionId("");
                           setVpVersionDetail(null);
-                          setVpProfileForm({ voice_profile_name: "", intended_use: "" });
+                          setVpProfileForm({
+                            voice_profile_name: "",
+                            intended_use: "",
+                            core_voice: "",
+                            summary: "",
+                            do_rules_text: "",
+                            dont_rules_text: "",
+                          });
                           setVpGenerateForm((prev) => ({ ...prev, dataset_ids: [] }));
                           setVpProfileComposerMode("hidden");
                         }}
@@ -371,11 +305,11 @@ export default function VoiceProfilesSettings({
                         Cancel
                       </button>
                       <button
-                        className="primary"
-                        disabled={busy || !authToken || !vpSelectedCollectionId || !(vpGenerateForm.dataset_ids || []).length || !(vpProfileForm.voice_profile_name || "").trim()}
-                        onClick={onVpGenerateVersion}
+                        className="secondary"
+                        disabled={busy || !authToken || !(vpProfileForm.voice_profile_name || "").trim()}
+                        onClick={onVpCreateProfile}
                       >
-                        {isVpGenerating ? "Generating Profile Version..." : "Generate Profile Version"}
+                        Save Profile
                       </button>
                     </div>
                   </>
@@ -388,13 +322,32 @@ export default function VoiceProfilesSettings({
                       </div>
                     </div>
                     <div style={{ marginTop: "12px" }}>
-                      <label>Selected Datasets</label>
-                      {!vpVersionDetail?.datasets?.length ? <p className="note">No datasets linked to this version.</p> : null}
+                      <label>Core Voice</label>
+                      <div className="note" style={{ marginTop: "6px", fontSize: "14px" }}>
+                        {vpVersionDetail?.version?.core_voice || "Not specified"}
+                      </div>
+                    </div>
+                    <div style={{ marginTop: "12px" }}>
+                      <label>Summary</label>
+                      <div className="note" style={{ marginTop: "6px", fontSize: "14px", whiteSpace: "pre-wrap" }}>
+                        {versionSummary}
+                      </div>
+                    </div>
+                    <div style={{ marginTop: "12px" }}>
+                      <label>Dos</label>
+                      {!versionDoRules.length ? <p className="note">No do rules added.</p> : null}
                       <div className="row" style={{ marginTop: "8px" }}>
-                        {(vpVersionDetail?.datasets || []).map((d) => (
-                          <span key={d.voice_profile_version_dataset_id} className="tag">
-                            {d.dataset_name || d.dataset_id}
-                          </span>
+                        {versionDoRules.map((rule) => (
+                          <span key={rule} className="tag">{rule}</span>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{ marginTop: "12px" }}>
+                      <label>Don'ts</label>
+                      {!versionDontRules.length ? <p className="note">No don't rules added.</p> : null}
+                      <div className="row" style={{ marginTop: "8px" }}>
+                        {versionDontRules.map((rule) => (
+                          <span key={rule} className="tag">{rule}</span>
                         ))}
                       </div>
                     </div>
@@ -452,8 +405,7 @@ export default function VoiceProfilesSettings({
               </div>
             ) : null}
           </div>
-        </div>
-      ) : null}
+      </div>
     </>
   );
 }

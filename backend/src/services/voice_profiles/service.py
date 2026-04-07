@@ -196,12 +196,55 @@ class VoiceProfileModuleService:
         collection = self.repo.get_collection(collection_id)
         if collection is None:
             raise ValueError("Collection not found")
-        if not voice_profile_name.strip():
+        normalized_name = voice_profile_name.strip()
+        if not normalized_name:
             raise ValueError("voice_profile_name is required")
+        existing_profiles = self.repo.list_voice_profiles(collection_id)
+        if any(str(profile.voice_profile_name or "").strip().lower() == normalized_name.lower() for profile in existing_profiles):
+            raise ValueError("A voice profile with this name already exists in the selected collection")
         return collection, self.repo.create_voice_profile(
             collection_id=collection_id,
-            voice_profile_name=voice_profile_name,
+            voice_profile_name=normalized_name,
         )
+
+    def create_manual_version(
+        self,
+        *,
+        voice_profile_id: uuid.UUID,
+        intended_use: str | None,
+        core_voice: str | None,
+        summary: str | None,
+        do_rules: list[str],
+        dont_rules: list[str],
+    ):
+        try:
+            voice_profile = self.repo.get_voice_profile(voice_profile_id)
+            if voice_profile is None:
+                raise ValueError("Voice profile not found")
+
+            normalized_intended_use = str(intended_use or "").strip() or None
+            normalized_core_voice = str(core_voice or "").strip() or None
+            normalized_summary = str(summary or "").strip() or None
+            normalized_do_rules = _coerce_to_string_list(do_rules)
+            normalized_dont_rules = _coerce_to_string_list(dont_rules)
+
+            version = self.repo.create_manual_version(
+                voice_profile_id=voice_profile_id,
+                intended_use=normalized_intended_use,
+                core_voice=normalized_core_voice,
+                summary=normalized_summary,
+                do_rules=normalized_do_rules,
+                dont_rules=normalized_dont_rules,
+            )
+            voice_profile.updated_at = version.updated_at
+            self.db.add(voice_profile)
+            self.db.commit()
+            version = self.repo.activate_version(version.voice_profile_version_id)
+            self.db.refresh(voice_profile)
+            return voice_profile, version
+        except Exception:
+            self.db.rollback()
+            raise
 
     def ingest_dataset_from_blob(
         self,

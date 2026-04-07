@@ -87,6 +87,11 @@ label { font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px; }
   outline-offset: 2px;
 }
 input, select, textarea { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 14px; }
+input::placeholder,
+textarea::placeholder {
+  font-style: italic;
+  color: #98a4b5;
+}
 
 /* Normalize form controls so they render consistently across Windows/browser themes. */
 input, select, textarea, button {

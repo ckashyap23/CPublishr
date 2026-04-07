@@ -10,6 +10,46 @@ from src.services.orchestration.nodes.base import OrchestrationNode
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_VOICE_PROFILE_ID = "__default_voice_profile__"
+DEFAULT_VOICE_PROFILE_PAYLOAD = {
+    "voice_profile_id": DEFAULT_VOICE_PROFILE_ID,
+    "voice_profile_version_id": f"{DEFAULT_VOICE_PROFILE_ID}:v1",
+    "voice_profile_name": "Default Voice Profile",
+    "version_no": 1,
+    "generation_status": "approved",
+    "core_voice": "professional, expert, witty, warm and friendly",
+    "style_summary": {
+        "intended_uses": [
+            "analysis",
+            "educating",
+            "expert",
+            "professional",
+            "witty",
+            "warm_and_friendly",
+        ],
+        "summary": "A built-in default voice for analysis, education, expert guidance, professional communication, light wit, and warm friendly delivery.",
+    },
+    "tone_baseline": {
+        "directness": 3,
+        "warmth": 3,
+        "energy": 2,
+        "authority": 3,
+        "formality": 3,
+    },
+    "do_rules": [
+        "Explain clearly and teach practically",
+        "Sound expert without sounding cold",
+        "Keep the tone professional and approachable",
+        "Use light wit only when it improves readability",
+    ],
+    "dont_rules": [
+        "Do not sound robotic or overly stiff",
+        "Do not use sarcasm that weakens trust",
+        "Do not hide the main point behind filler",
+    ],
+    "exemplars": [],
+}
+
 
 class VoiceProfileResolveNode(OrchestrationNode):
     """
@@ -84,6 +124,19 @@ class VoiceProfileResolveNode(OrchestrationNode):
             return NodeExecutionResult(
                 status="completed",
                 output_payload={"resolved": False, "reason": "no_voice_profile_id_provided"},
+            )
+
+        if voice_profile_id == DEFAULT_VOICE_PROFILE_ID:
+            context.state["voice_profile"] = dict(DEFAULT_VOICE_PROFILE_PAYLOAD)
+            return NodeExecutionResult(
+                status="completed",
+                output_payload={
+                    "resolved": True,
+                    "voice_profile_id": DEFAULT_VOICE_PROFILE_PAYLOAD["voice_profile_id"],
+                    "voice_profile_version_id": DEFAULT_VOICE_PROFILE_PAYLOAD["voice_profile_version_id"],
+                    "version_no": DEFAULT_VOICE_PROFILE_PAYLOAD["version_no"],
+                    "generation_status": DEFAULT_VOICE_PROFILE_PAYLOAD["generation_status"],
+                },
             )
 
         try:

@@ -185,9 +185,10 @@ export function orderArtifactFormats(kind, formats) {
 }
 
 export async function apiRequest(baseUrl, method, path, body, token = "") {
+  const base = baseUrl == null || baseUrl === undefined ? "" : String(baseUrl).replace(/\/$/, "");
   const headers = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`${baseUrl}${path}`, {
+  const res = await fetch(`${base}${path}`, {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,

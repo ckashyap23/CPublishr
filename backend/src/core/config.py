@@ -1,4 +1,9 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+_BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -72,7 +77,7 @@ class Settings(BaseSettings):
     # - GCS: gs://<bucket>/<prefix>
     output_path: str = ""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=_BACKEND_ROOT / ".env", extra="ignore")
 
 
 settings = Settings()
