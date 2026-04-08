@@ -41,9 +41,9 @@ class AzureSoraPreviewConfig:
 
 
 def _get_azure_sora_preview_config() -> AzureSoraPreviewConfig | None:
-    endpoint = (settings.azure_sora_endpoint or "").strip().rstrip("/")
-    api_key = (settings.azure_sora_api_key or "").strip()
-    api_version = (settings.azure_sora_api_version or "").strip() or "preview"
+    endpoint = (settings.azure_video_endpoint or "").strip().rstrip("/")
+    api_key = (settings.azure_api_key or "").strip()
+    api_version = (settings.azure_video_api_version or "").strip() or "preview"
     if not endpoint or not api_key:
         return None
     return AzureSoraPreviewConfig(endpoint=endpoint, api_key=api_key, api_version=api_version)
@@ -628,7 +628,7 @@ class VideoArtifactsBuilder:
 
     @staticmethod
     def _deployment_name() -> str:
-        return str(settings.azure_sora_deployment_name or "").strip()
+        return str(settings.azure_video_deployment_name or "").strip()
 
     @staticmethod
     def _polling_controls() -> tuple[int, int]:
@@ -1120,7 +1120,7 @@ class VideoArtifactsBuilder:
                 "format": fmt,
                 "generation_source": "azure_sora_preview",
                 "video_generation_status": "failed",
-                "error_message": "Missing Azure Sora config in settings (azure_sora_endpoint / azure_sora_api_key).",
+                "error_message": "Missing Azure video config in settings (azure_video_endpoint / azure_video_api_version / azure_api_key).",
             }
             title = str(getattr(ctx, "topic_title", "") or "").strip() or f"video - {fmt}"
             tags = [str(x).strip() for x in (ctx.seed_keywords or []) if str(x).strip()]
@@ -1131,7 +1131,7 @@ class VideoArtifactsBuilder:
                 "format": fmt,
                 "generation_source": "azure_sora_preview",
                 "video_generation_status": "failed",
-                "error_message": "Missing Azure Sora deployment name in settings (azure_sora_deployment_name).",
+                "error_message": "Missing Azure video deployment name in settings (azure_video_deployment_name).",
             }
             title = str(getattr(ctx, "topic_title", "") or "").strip() or f"video - {fmt}"
             tags = [str(x).strip() for x in (ctx.seed_keywords or []) if str(x).strip()]

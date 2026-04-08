@@ -401,8 +401,8 @@ export default function App() {
   const projectHasSavedVoiceProfileOption = useMemo(() => {
     const currentVoiceProfileId = String(form.voice_profile_id || "").trim();
     if (!currentVoiceProfileId) return false;
-    return approvedActiveVoiceProfileOptions.some((opt) => opt.value === currentVoiceProfileId);
-  }, [approvedActiveVoiceProfileOptions, form.voice_profile_id]);
+    return setupVoiceProfileOptions.some((opt) => opt.value === currentVoiceProfileId);
+  }, [setupVoiceProfileOptions, form.voice_profile_id]);
   const projectToneBase = useMemo(() => toneBaseFromProjectTone(form.tone_preference), [form.tone_preference]);
   const artifactSelectedFormatCards = useMemo(
     () => selectedArtifactFormats.map((fmt) => artifactFormatMeta(fmt)),
@@ -782,6 +782,10 @@ async function refreshVersions(projectId, preferredVersion) {
   async function loadArtifactVoiceProfilePreview(voiceProfileId) {
     if (!voiceProfileId || !authToken) {
       setArtifactStyleVoiceProfileDetail(null);
+      return;
+    }
+    if (voiceProfileId === DEFAULT_VOICE_PROFILE_ID) {
+      setArtifactStyleVoiceProfileDetail(DEFAULT_VOICE_PROFILE_DETAIL);
       return;
     }
     setIsArtifactStyleVoiceProfileLoading(true);
@@ -3104,7 +3108,7 @@ async function refreshVersions(projectId, preferredVersion) {
         artifactStyleVoiceProfileId={artifactStyleVoiceProfileId}
         setArtifactStyleVoiceProfileId={setArtifactStyleVoiceProfileId}
         setArtifactStyleVoiceProfileDetail={setArtifactStyleVoiceProfileDetail}
-        approvedActiveVoiceProfileOptions={approvedActiveVoiceProfileOptions}
+        approvedActiveVoiceProfileOptions={setupVoiceProfileOptions}
         isArtifactStyleVoiceProfileLoading={isArtifactStyleVoiceProfileLoading}
         artifactSelectedVoiceProfilePreview={artifactSelectedVoiceProfilePreview}
         artifactManualCoreVoice={artifactManualCoreVoice}

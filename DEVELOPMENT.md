@@ -11,8 +11,6 @@ Everything you need to run CPublishr locally on macOS, Linux, or Windows.
 | npm | 9+ | bundled with Node |
 | PostgreSQL | 14+ | local or hosted (e.g. Neon, Supabase, Azure) |
 
-Redis is listed in `.env.example` but is not required to run the app locally — the default `redis://localhost:6379/0` is only used if you enable Redis-backed features.
-
 ---
 
 ## Backend Setup
@@ -157,3 +155,43 @@ ui/react/
 docs/                   Architecture docs and team guides
 infra/                  Docker and environment templates
 ```
+
+---
+
+## Deploying to Render
+
+A `render.yaml` at the project root defines both services. Deploy steps:
+
+### 1. Deploy the backend first
+
+In the Render dashboard, set these environment variables on `cpublishr-backend`:
+
+| Variable | Value |
+|----------|-------|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `AUTH_JWT_SECRET` | `openssl rand -hex 32` |
+| `CORS_ALLOW_ORIGINS` | Your frontend Render URL, e.g. `https://cpublishr-frontend.onrender.com` |
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI resource URL |
+| `AZURE_OPENAI_SUBSCRIPTION_KEY` | Azure OpenAI key |
+| `AZURE_API_KEY` | Azure AI key (for Flux image generation) |
+| `AZURE_IMAGE_ENDPOINT` | Flux endpoint URL |
+| `AZURE_IMAGE_DEPLOYMENT` | e.g. `FLUX.2-pro` |
+
+The start command in `render.yaml` uses `$PORT` which Render injects automatically.
+
+### 2. Deploy the frontend
+
+Set this environment variable on `cpublishr-frontend` **before the build runs**:
+
+| Variable | Value |
+|----------|-------|
+| `VITE_API_BASE_URL` | Your backend Render URL, e.g. `https://cpublishr-backend.onrender.com` |
+
+`VITE_API_BASE_URL` is baked into the static bundle at build time — if it's not set before the build, the frontend won't be able to reach the backend.
+
+### Local vs production routing
+
+| Environment | How `/api` calls are routed |
+|-------------|----------------------------|
+| Local dev (`npm run dev`) | Vite proxy → `http://127.0.0.1:8010` |
+| Production (Render static site) | Direct fetch to `VITE_API_BASE_URL` |

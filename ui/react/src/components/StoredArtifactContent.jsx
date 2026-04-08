@@ -49,9 +49,6 @@ export default function StoredArtifactContent({ artifact }) {
             Image preview unavailable in browser. URI: <code>{String(imageAsset?.uri || imageAsset?.path || "not available")}</code>
           </p>
         )}
-        {imageAsset ? (
-          <p className="note">Format: {imageAsset.format || "-"}{imageAsset.path ? ` | Path: ${imageAsset.path}` : ""}</p>
-        ) : null}
         {assetDetails ? <p className="note artifact-ps-note">{assetDetails}</p> : null}
       </div>
     );

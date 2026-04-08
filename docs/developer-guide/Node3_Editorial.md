@@ -106,9 +106,3 @@ Keep these stable unless coordinated:
 - Editorial endpoints preserve current contracts.
 - Finalization reliably sets one final pointer/version.
 - Downstream artifact + platform output generation still works after finalization.
-
----
-
-## Backend Update Reference
-
-Backend-side implemented changes (UI excluded) are tracked in [../../BACKEND_CHANGES.md](../../BACKEND_CHANGES.md).

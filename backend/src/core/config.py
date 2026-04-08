@@ -35,19 +35,19 @@ class Settings(BaseSettings):
     azure_openai_endpoint: str = ""
     azure_openai_deployment: str = "gpt-4o-mini"
     azure_openai_subscription_key: str = ""
+    azure_api_key: str = ""
     azure_openai_api_version: str = "2024-12-01-preview"
     artifact_text_llm_enabled: bool = False
 
     # Image generation (DALL-E 3); empty = simulated mode
-    azure_openai_image_endpoint: str = ""  # If empty, falls back to azure_openai_endpoint
-    azure_openai_image_deployment: str = ""
-    azure_openai_image_api_version: str = "2024-02-01"
+    azure_image_endpoint: str = ""
+    azure_image_deployment: str = ""
+    azure_image_api_version: str = "2024-02-01"
 
     # Video generation (Sora); empty = simulated mode
-    azure_sora_endpoint: str = ""
-    azure_sora_api_key: str = ""
-    azure_sora_api_version: str = "preview"
-    azure_sora_deployment_name: str = ""  # e.g., "sora-preview"
+    azure_video_endpoint: str = ""
+    azure_video_api_version: str = "preview"
+    azure_video_deployment_name: str = ""  # e.g., "sora-preview"
 
     # Azure Blob storage for voice profile dataset ingestion
     azure_storage_connection_string: str = ""

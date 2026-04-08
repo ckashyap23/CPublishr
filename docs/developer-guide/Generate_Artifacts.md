@@ -160,9 +160,3 @@ Injected as `FORMAT INTENT:` per format:
    - `GET /api/v1/artifacts/catalog/formats`
    - UI format list
    - `POST /api/v1/artifacts/generate`
-
----
-
-## Backend Update Reference
-
-Backend-side implemented changes (UI excluded) are tracked in [../../BACKEND_CHANGES.md](../../BACKEND_CHANGES.md).

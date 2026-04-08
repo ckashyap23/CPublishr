@@ -13,20 +13,23 @@ Enable each authenticated user to:
 
 ## Current API Surface
 
-Mounted endpoints (only these are live):
-- `POST /api/v1/auth/signup`
-- `POST /api/v1/auth/login`
-- `GET /api/v1/auth/me`
-- `POST /api/v1/voice-profiles/collections`
-- `GET /api/v1/voice-profiles/collections`
-- `GET /api/v1/voice-profiles/collections/{voice_profile_id}`
-- `POST /api/v1/voice-profiles/collections/{voice_profile_id}/versions/generate`
-- `GET /api/v1/voice-profiles/versions/{voice_profile_version_id}`
-- `POST /api/v1/voice-profiles/versions/{voice_profile_version_id}/activate`
-- `POST /api/v1/voice-profiles/versions/{voice_profile_version_id}/status`
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/api/v1/voice-profiles/collections` | Create collection |
+| GET | `/api/v1/voice-profiles/collections` | List collections |
+| GET | `/api/v1/voice-profiles/collections/{id}` | Get collection detail |
+| POST | `/api/v1/voice-profiles/collections/{id}/datasets` | Add dataset |
+| POST | `/api/v1/voice-profiles/collections/{id}/profiles` | Create profile |
+| GET | `/api/v1/voice-profiles/profiles` | List profiles |
+| GET | `/api/v1/voice-profiles/profiles/{id}` | Get profile |
+| POST | `/api/v1/voice-profiles/profiles/{id}/status` | Enable/disable profile |
+| DELETE | `/api/v1/voice-profiles/profiles/{id}` | Delete profile |
+| POST | `/api/v1/voice-profiles/profiles/{id}/versions/generate` | Generate new version |
+| GET | `/api/v1/voice-profiles/versions/{id}` | Get version detail |
+| POST | `/api/v1/voice-profiles/versions/{id}/activate` | Activate version |
+| POST | `/api/v1/voice-profiles/versions/{id}/status` | Update version status |
 
-Router source:
-- `backend/src/api/v1/router.py`
+Router source: `backend/src/api/v1/router.py`
 
 ## Data Model (Current)
 
@@ -178,9 +181,3 @@ Current simplifications:
   - `backend/src/db/init_db.py`
 - UI:
   - `ui/react/src/App.jsx`
-
----
-
-## Backend Update Reference
-
-Backend-side implemented changes (UI excluded) are tracked in [../../BACKEND_CHANGES.md](../../BACKEND_CHANGES.md).

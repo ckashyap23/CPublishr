@@ -6,6 +6,7 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 
@@ -33,6 +34,199 @@ def available_image_tools() -> dict[str, Callable[..., dict[str, Any]]]:
     }
 
 
+def _looks_like_flux_provider_endpoint(endpoint: str, deployment: str) -> bool:
+    endpoint_lower = str(endpoint or "").strip().lower()
+    deployment_lower = str(deployment or "").strip().lower()
+    return "/providers/blackforestlabs/" in endpoint_lower or deployment_lower.startswith("flux")
+
+
+def _deployment_to_flux_slug(deployment: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", str(deployment or "").strip().lower()).strip("-")
+    return slug or "flux-2-pro"
+
+
+def _build_flux_url(endpoint: str, deployment: str, api_version: str) -> str:
+    raw = str(endpoint or "").strip()
+    if not raw:
+        return ""
+
+    if "/providers/blackforestlabs/" in raw.lower():
+        parsed = urlparse(raw)
+        query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        query["api-version"] = str(api_version or "preview").strip() or "preview"
+        return urlunparse(parsed._replace(query=urlencode(query)))
+
+    base = raw.rstrip("/")
+    return f"{base}/providers/blackforestlabs/v1/{_deployment_to_flux_slug(deployment)}?api-version={api_version}"
+
+
+def _size_to_dimensions(size: str) -> tuple[int, int]:
+    match = re.fullmatch(r"\s*(\d{2,5})x(\d{2,5})\s*", str(size or ""))
+    if not match:
+        return 1024, 1024
+    return int(match.group(1)), int(match.group(2))
+
+
+def _download_remote_image(url: str) -> tuple[bytes | None, str | None, str | None]:
+    try:
+        with httpx.Client(timeout=60.0, follow_redirects=True) as client:
+            resp = client.get(url)
+            resp.raise_for_status()
+            return resp.content, resp.headers.get("content-type"), None
+    except httpx.HTTPStatusError as e:
+        detail = (e.response.text or "").strip()
+        msg = f"Image download HTTP {e.response.status_code}"
+        if detail:
+            msg = f"{msg}: {detail[:500]}"
+        return None, None, msg
+    except Exception as e:
+        return None, None, str(e)
+
+
+def _persist_generated_image(
+    *,
+    image_bytes: bytes,
+    output_formats: list[str],
+    options: dict[str, Any],
+    inline_fallback: str | None = None,
+    source: str,
+) -> dict[str, Any]:
+    ext = (output_formats[0] if output_formats else "png").lower()
+    if ext == "jpg":
+        ext = "jpeg"
+    file_ext = ext if ext != "jpeg" else "jpg"
+    mime = f"image/{ext}"
+    project_id = str(options.get("project_id") or "")
+    user_id = str(options.get("user_id") or "")
+    topic_title = str(options.get("topic_title") or "")
+
+    saved_path = save_image_bytes_to_local(
+        data=image_bytes,
+        ext=file_ext,
+        project_id=project_id,
+        topic_title=topic_title,
+    )
+    local_filename = saved_path.name if saved_path else f"image_{int(time.time() * 1000)}.{file_ext}"
+    orchestrated_artifact_id = str(options.get("artifact_id") or "").strip()
+    artifact_key = orchestrated_artifact_id or (saved_path.stem if saved_path else f"img_{int(time.time() * 1000)}")
+
+    blob_ref = upload_artifact_bytes(
+        data=image_bytes,
+        user_id=user_id or "user",
+        project_id=project_id or "project",
+        fmt=str(options.get("artifact_format") or "image"),
+        artifact_id=artifact_key,
+        filename=local_filename,
+        content_type=mime,
+    )
+
+    if blob_ref:
+        uri = blob_ref["uri"]
+    elif saved_path:
+        uri = str(saved_path)
+    else:
+        b64 = inline_fallback or base64.b64encode(image_bytes).decode("ascii")
+        uri = f"data:{mime};base64,{b64}"
+
+    save_error = None if saved_path else "Image generated but local file save failed; returning inline data URI."
+    if blob_ref and save_error:
+        save_error = "Image uploaded to Azure Blob, but local file save failed."
+
+    return {
+        "error_message": save_error,
+        "images": [
+            {
+                "format": file_ext,
+                "mime_type": mime,
+                "uri": uri,
+                "path": str(saved_path) if saved_path else None,
+                "blob_path": (blob_ref or {}).get("blob_path"),
+                "source": "azure_blob" if blob_ref else ("local_disk" if saved_path else source),
+            }
+        ],
+    }
+
+
+def _extract_image_payload(api_response: dict[str, Any], requested_format: str) -> tuple[bytes | None, str | None, str | None]:
+    candidates: list[Any] = []
+    if isinstance(api_response.get("data"), list):
+        candidates.extend(api_response["data"])
+    if isinstance(api_response.get("images"), list):
+        candidates.extend(api_response["images"])
+    if isinstance(api_response.get("output"), list):
+        candidates.extend(api_response["output"])
+    candidates.append(api_response)
+
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        for key in ("b64_json", "base64", "image_base64", "image_b64"):
+            value = candidate.get(key)
+            if isinstance(value, str) and value.strip():
+                try:
+                    return base64.b64decode(value), requested_format, value
+                except Exception:
+                    pass
+        for key in ("url", "image_url", "output_url"):
+            value = candidate.get(key)
+            if isinstance(value, str) and value.strip():
+                image_bytes, content_type, download_error = _download_remote_image(value.strip())
+                if image_bytes:
+                    return image_bytes, content_type, None
+                return None, None, download_error or "Image provider returned an unusable URL."
+    return None, None, "Image provider returned no usable image data."
+
+
+def _call_flux_image_provider(
+    *,
+    prompt: str,
+    size: str,
+    response_format: str,
+) -> tuple[dict[str, Any] | None, str | None]:
+    deployment = (settings.azure_image_deployment or "").strip()
+    endpoint = (settings.azure_image_endpoint or "").strip()
+    api_key = (settings.azure_api_key or "").strip()
+    api_version = settings.azure_image_api_version
+
+    if not deployment or not endpoint or not api_key:
+        missing: list[str] = []
+        if not deployment:
+            missing.append("AZURE_IMAGE_DEPLOYMENT")
+        if not endpoint:
+            missing.append("AZURE_IMAGE_ENDPOINT")
+        if not api_key:
+            missing.append("AZURE_API_KEY")
+        return None, f"Missing Azure image configuration: {', '.join(missing)}"
+
+    width, height = _size_to_dimensions(size)
+    body = {
+        "model": deployment,
+        "prompt": (prompt or "")[:32000],
+        "width": width,
+        "height": height,
+        "output_format": "jpeg" if str(response_format or "").strip().lower() == "jpeg" else "png",
+        "num_images": 1,
+    }
+    url = _build_flux_url(endpoint, deployment, api_version)
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    try:
+        with httpx.Client(timeout=120.0) as client:
+            resp = client.post(url, headers=headers, json=body)
+            resp.raise_for_status()
+            return resp.json(), None
+    except httpx.HTTPStatusError as e:
+        detail = (e.response.text or "").strip()
+        msg = f"FLUX image HTTP {e.response.status_code}"
+        if detail:
+            msg = f"{msg}: {detail[:500]}"
+        logger.warning("FLUX image generation failed: %s", msg)
+        return None, msg
+    except Exception as e:
+        logger.warning("FLUX image generation failed: %s", e)
+        return None, str(e)
+
+
 # =============================================================================
 # Azure OpenAI (DALL·E 3) call
 # =============================================================================
@@ -46,10 +240,18 @@ def _call_azure_dalle(
     response_format: str = "b64_json",
 ) -> tuple[dict[str, Any] | None, str | None]:
     """Call Azure OpenAI DALL-E 3 Images API. Returns (response_data, error_message)."""
-    deployment = (settings.azure_openai_image_deployment or "").strip()
-    endpoint = (settings.azure_openai_image_endpoint or settings.azure_openai_endpoint or "").rstrip("/")
-    api_key = (settings.azure_openai_subscription_key or "").strip()
-    api_version = settings.azure_openai_image_api_version
+    deployment = (settings.azure_image_deployment or "").strip()
+    endpoint = (settings.azure_image_endpoint or "").rstrip("/")
+    api_key = (settings.azure_api_key or "").strip()
+    api_version = settings.azure_image_api_version
+
+    if _looks_like_flux_provider_endpoint(endpoint, deployment):
+        return _call_flux_image_provider(
+            prompt=prompt,
+            size=size,
+            response_format=response_format,
+        )
+
     deployment_lower = deployment.lower()
     is_gpt_image = "gpt-image" in deployment_lower
     is_retired_dalle3 = deployment_lower == "dall-e-3" or "dall-e-3" in deployment_lower
@@ -57,18 +259,18 @@ def _call_azure_dalle(
     if not deployment or not endpoint or not api_key:
         missing: list[str] = []
         if not deployment:
-            missing.append("AZURE_OPENAI_IMAGE_DEPLOYMENT")
+            missing.append("AZURE_IMAGE_DEPLOYMENT")
         if not endpoint:
-            missing.append("AZURE_OPENAI_ENDPOINT")
+            missing.append("AZURE_IMAGE_ENDPOINT")
         if not api_key:
-            missing.append("AZURE_OPENAI_SUBSCRIPTION_KEY")
+            missing.append("AZURE_API_KEY")
         return None, f"Missing Azure image configuration: {', '.join(missing)}"
 
     if is_retired_dalle3:
         return (
             None,
             "Azure image deployment 'dall-e-3' is retired as of March 4, 2026. "
-            "Update AZURE_OPENAI_IMAGE_DEPLOYMENT to a gpt-image-1 or gpt-image-1.5 deployment.",
+            "Update AZURE_IMAGE_DEPLOYMENT to a gpt-image-1 or gpt-image-1.5 deployment.",
         )
 
     if is_gpt_image:
@@ -128,12 +330,14 @@ def connect_openai_images(*, prompt: str, output_formats: list[str], options: di
     size = str(options.get("size") or "1024x1024").strip()
     quality = str(options.get("quality") or "standard").strip().lower()
     style = str(options.get("style") or "vivid").strip().lower()
-    deployment = (settings.azure_openai_image_deployment or "").strip().lower()
-    is_gpt_image = "gpt-image" in deployment
+    deployment = (settings.azure_image_deployment or "").strip().lower()
+    endpoint = (settings.azure_image_endpoint or "").strip()
+    is_flux_provider = _looks_like_flux_provider_endpoint(endpoint, deployment)
+    is_gpt_image = "gpt-image" in deployment and not is_flux_provider
     requested_output_format = str((output_formats[0] if output_formats else "png") or "png").strip().lower()
     if requested_output_format == "jpg":
         requested_output_format = "jpeg"
-    response_or_output_format = requested_output_format if is_gpt_image else "b64_json"
+    response_or_output_format = requested_output_format if (is_gpt_image or is_flux_provider) else "b64_json"
 
     api_response, api_error = _call_azure_dalle(
         prompt=prompt,
@@ -143,69 +347,29 @@ def connect_openai_images(*, prompt: str, output_formats: list[str], options: di
         response_format=response_or_output_format,
     )
 
-    if api_response and "data" in api_response and api_response["data"]:
-        item = api_response["data"][0]
-        b64 = item.get("b64_json")
-        if b64:
-            ext = (output_formats[0] if output_formats else "png").lower()
-            if ext == "jpg":
-                ext = "jpeg"
-            file_ext = ext if ext != "jpeg" else "jpg"
-            mime = f"image/{ext}"
-            image_bytes = base64.b64decode(b64)
-            project_id = str(options.get("project_id") or "")
-            user_id = str(options.get("user_id") or "")
-            topic_title = str(options.get("topic_title") or "")
-
-            saved_path = save_image_bytes_to_local(
-                data=image_bytes,
-                ext=file_ext,
-                project_id=project_id,
-                topic_title=topic_title,
+    if api_response:
+        image_bytes, _, extracted_inline_b64 = _extract_image_payload(api_response, requested_output_format)
+        if image_bytes:
+            persisted = _persist_generated_image(
+                image_bytes=image_bytes,
+                output_formats=output_formats,
+                options=options,
+                inline_fallback=extracted_inline_b64,
+                source="inline_data_uri" if extracted_inline_b64 else "remote_url",
             )
-            local_filename = saved_path.name if saved_path else f"image_{int(time.time() * 1000)}.{file_ext}"
-            orchestrated_artifact_id = str(options.get("artifact_id") or "").strip()
-            artifact_key = orchestrated_artifact_id or (saved_path.stem if saved_path else f"img_{int(time.time() * 1000)}")
-
-            blob_ref = upload_artifact_bytes(
-                data=image_bytes,
-                user_id=user_id or "user",
-                project_id=project_id or "project",
-                fmt=str(options.get("artifact_format") or "image"),
-                artifact_id=artifact_key,
-                filename=local_filename,
-                content_type=mime,
-            )
-
-            uri = blob_ref["uri"] if blob_ref else (str(saved_path) if saved_path else f"data:{mime};base64,{b64}")
-            save_error = None if saved_path else "Image generated but local file save failed; returning inline data URI."
-            if blob_ref and save_error:
-                save_error = "Image uploaded to Azure Blob, but local file save failed."
-
             return {
-                "provider": "openai",
+                "provider": "flux" if is_flux_provider else "openai",
                 "status": "generated",
                 "prompt": prompt,
                 "options": options,
-                "error_message": save_error,
-                "images": [
-                    {
-                        "format": file_ext,
-                        "mime_type": mime,
-                        "uri": uri,
-                        "path": str(saved_path) if saved_path else None,
-                        "blob_path": (blob_ref or {}).get("blob_path"),
-                        "source": "azure_blob" if blob_ref else ("local_disk" if saved_path else "inline_data_uri"),
-                    }
-                ],
+                "error_message": persisted.get("error_message"),
+                "images": persisted["images"],
             }
-        api_error = "Azure image response missing b64_json in first data item."
-    elif api_response:
-        api_error = "Azure image response returned no data items."
+        api_error = extracted_inline_b64
 
     # Simulated fallback (kept deterministic-ish for pipeline)
     return {
-        "provider": "openai",
+        "provider": "flux" if is_flux_provider else "openai",
         "status": "simulated",
         "prompt": prompt,
         "options": options,
@@ -214,7 +378,7 @@ def connect_openai_images(*, prompt: str, output_formats: list[str], options: di
             {
                 "format": ext,
                 "mime_type": f"image/{'jpeg' if ext == 'jpg' else ext}",
-                "uri": f"azure_openai://generated/{ext}/image-1",
+                "uri": f"{'flux' if is_flux_provider else 'azure_openai'}://generated/{ext}/image-1",
             }
             for ext in output_formats
         ],
@@ -574,6 +738,7 @@ class ImageGenerationBuilder:
 
         # Compose prompt with precedence
         primary: list[str] = [
+            "HARD RULE: Render NO text, letters, words, numbers, captions, labels, watermarks, or typography of any kind anywhere in the image. This rule overrides all other instructions.",
             f"FORMAT INTENT: {recipe.prompt_hint}",
             "PRIORITY: Follow the visual brief below strictly. Use reference context only if it does not conflict.",
             f"OUTPUT: single {fmt_label} image for '{topic_title}'. Audience: {segment}. Tone: {tone}.",
@@ -626,7 +791,7 @@ class ImageGenerationBuilder:
             style_lines.append(f"Mood: {mood}.")
 
         constraints: list[str] = [
-            "Do NOT generate readable text, typography, logos, or watermarks.",
+            "ABSOLUTELY NO text, letters, words, numbers, captions, labels, watermarks, logos, or typography of any kind. Not even partial or stylized glyphs. Pure visual image only.",
         ]
         if avoid_dedup:
             constraints.append("Avoid / do not include: " + ", ".join(avoid_dedup) + ".")

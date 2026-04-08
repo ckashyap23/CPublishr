@@ -11,7 +11,6 @@ import GenerateArtifactsFormatsStep from "./GenerateArtifactsFormatsStep";
 import GenerateArtifactsImageStyleStep from "./GenerateArtifactsImageStyleStep";
 import GenerateArtifactsTextStyleStep from "./GenerateArtifactsTextStyleStep";
 import GenerateArtifactsVideoStyleStep from "./GenerateArtifactsVideoStyleStep";
-import GeneratedArtifactsPreview from "./GeneratedArtifactsPreview";
 import StoredArtifactReadOnly from "./StoredArtifactReadOnly";
 import StoredArtifactTabs from "./StoredArtifactTabs";
 
@@ -273,13 +272,6 @@ export default function ArtifactGeneratorPanel(props) {
         </>
       ) : null}
       {isCheckingStoredArtifacts ? <p className="note" style={{ marginTop: "8px" }}>Checking stored artifacts for this project...</p> : null}
-      <GeneratedArtifactsPreview
-        active={artifactsViewMode === "generate"}
-        generatedArtifacts={generatedArtifacts}
-        selectedArtifactTab={selectedArtifactTab}
-        setSelectedArtifactTab={setSelectedArtifactTab}
-        selectedGeneratedArtifact={selectedGeneratedArtifact}
-      />
       {artifactsViewMode === "stored" && storedArtifacts.length > 0 ? (
         <>
           <h3 style={{ marginTop: "16px" }}>Stored Artifacts</h3>

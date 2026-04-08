@@ -94,9 +94,3 @@ UI should only collect mappings.
    - `GET /api/v1/publishing/platforms/{platform}/fields`
    - `POST /api/v1/publishing/save-to-publish`
    - `POST /api/v1/publishing/jobs/artifacts`
-
----
-
-## Backend Update Reference
-
-Backend-side implemented changes (UI excluded) are tracked in [../../BACKEND_CHANGES.md](../../BACKEND_CHANGES.md).

@@ -1,0 +1,86 @@
+services:
+  # ── Backend ── FastAPI (Python web service) ──────────────────────────────
+  - type: web
+    name: cpublishr-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -e ".[dev]"
+    startCommand: uvicorn src.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+
+    envVars:
+      # Database (required) ------------------------------------------------
+      - key: DATABASE_URL
+        sync: false          # set in Render dashboard
+
+      # Auth (required) ----------------------------------------------------
+      - key: AUTH_JWT_SECRET
+        sync: false
+
+      # CORS — set to your frontend Render URL (required in prod) ----------
+      # e.g. https://cpublishr-frontend.onrender.com
+      - key: CORS_ALLOW_ORIGINS
+        sync: false
+
+      # LLM ----------------------------------------------------------------
+      - key: LLM_PROVIDER
+        value: azure
+      - key: AZURE_OPENAI_ENDPOINT
+        sync: false
+      - key: AZURE_OPENAI_DEPLOYMENT
+        value: gpt-4o-mini
+      - key: AZURE_OPENAI_SUBSCRIPTION_KEY
+        sync: false
+      - key: AZURE_OPENAI_API_VERSION
+        value: "2024-12-01-preview"
+      - key: ARTIFACT_TEXT_LLM_ENABLED
+        value: "true"
+
+      # Image generation (Flux / Azure AI) ---------------------------------
+      - key: AZURE_API_KEY
+        sync: false
+      - key: AZURE_IMAGE_ENDPOINT
+        sync: false
+      - key: AZURE_IMAGE_DEPLOYMENT
+        sync: false
+      - key: AZURE_IMAGE_API_VERSION
+        value: preview
+
+      # Video generation (Sora) --------------------------------------------
+      - key: AZURE_VIDEO_ENDPOINT
+        sync: false
+      - key: AZURE_VIDEO_API_VERSION
+        value: preview
+      - key: AZURE_VIDEO_DEPLOYMENT_NAME
+        sync: false
+
+      # Azure Blob — artifacts ---------------------------------------------
+      - key: AZURE_STORAGE_CONNECTION_STRING
+        sync: false
+      - key: AZURE_ARTIFACTS_ENABLED
+        value: "true"
+      - key: AZURE_ARTIFACTS_CONTAINER
+        value: artifacts
+      - key: AZURE_ARTIFACTS_BLOB_PREFIX
+        value: artifacts
+      - key: AZURE_ARTIFACTS_PUBLIC_READ
+        value: "false"
+      - key: AZURE_ARTIFACTS_SAS_TTL_MINUTES
+        value: "60"
+
+      # DB -----------------------------------------------------------------
+      - key: DB_AUTO_CREATE
+        value: "true"
+
+  # ── Frontend ── React SPA (static site) ─────────────────────────────────
+  - type: web
+    name: cpublishr-frontend
+    runtime: static
+    rootDir: ui/react
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+
+    envVars:
+      # Set to your backend Render URL, e.g. https://cpublishr-backend.onrender.com
+      - key: VITE_API_BASE_URL
+        sync: false

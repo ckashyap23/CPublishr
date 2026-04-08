@@ -130,9 +130,3 @@ Recommended:
 - Output contract stable and valid.
 - Base and variants are both usable in editorial flows via version numbers.
 - Section outline semantics are consistent for base and variants.
-
----
-
-## Backend Update Reference
-
-Backend-side implemented changes (UI excluded) are tracked in [../../BACKEND_CHANGES.md](../../BACKEND_CHANGES.md).

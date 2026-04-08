@@ -186,13 +186,22 @@ export function orderArtifactFormats(kind, formats) {
 
 export async function apiRequest(baseUrl, method, path, body, token = "") {
   const base = baseUrl == null || baseUrl === undefined ? "" : String(baseUrl).replace(/\/$/, "");
+  const target = `${base}${path}`;
   const headers = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`${base}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+
+  let res;
+  try {
+    res = await fetch(target, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error || "Network request failed");
+    throw new Error(`Network request failed for ${method} ${path}. Check that the UI proxy/backend is reachable. ${msg}`);
+  }
+
   const txt = await res.text();
   let json = null;
   try {

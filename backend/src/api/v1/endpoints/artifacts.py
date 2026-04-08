@@ -146,7 +146,8 @@ def generate_artifacts(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Artifact generation failed for project_id=%s", payload.project_id)
-        raise HTTPException(status_code=500, detail="Artifact generation failed") from exc
+        detail = str(exc).strip() or "Artifact generation failed"
+        raise HTTPException(status_code=500, detail=detail[:2000]) from exc
     return ArtifactGenerationResponse.model_validate(out)
 
 
@@ -171,7 +172,8 @@ def edit_artifact(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Artifact edit failed for artifact_id=%s mode=%s", payload.artifact_id, payload.mode)
-        raise HTTPException(status_code=500, detail="Artifact edit failed") from exc
+        detail = str(exc).strip() or "Artifact edit failed"
+        raise HTTPException(status_code=500, detail=detail[:2000]) from exc
     return ArtifactEditResponse.model_validate(out)
 
 
@@ -188,7 +190,8 @@ def suggest_artifact_styles(
         suggestions = svc.suggest(project_id=payload.project_id, formats=payload.formats)
     except Exception as exc:
         logger.exception("Artifact style suggestion failed for project_id=%s", payload.project_id)
-        raise HTTPException(status_code=500, detail="Artifact style suggestion failed") from exc
+        detail = str(exc).strip() or "Artifact style suggestion failed"
+        raise HTTPException(status_code=500, detail=detail[:2000]) from exc
     return ArtifactSuggestResponse(suggestions=suggestions)
 
 

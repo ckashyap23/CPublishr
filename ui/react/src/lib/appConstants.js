@@ -1,8 +1,27 @@
-// Must always be a string: undefined becomes "undefined" in fetch URLs → 404 on the dev server.
+// Must always be a string: undefined becomes "undefined" in fetch URLs â†’ 404 on the dev server.
 // Empty string = same origin; use Vite proxy (see vite.config.js). Override with VITE_API_BASE_URL if needed.
 const raw = import.meta.env.VITE_API_BASE_URL;
-export const API_BASE_DEFAULT =
-  typeof raw === "string" && raw.trim() !== "" ? raw.trim().replace(/\/$/, "") : "";
+
+function isLoopbackHost(hostname) {
+  const value = String(hostname || "").trim().toLowerCase();
+  return value === "127.0.0.1" || value === "localhost";
+}
+
+function shouldUseDevProxy(value) {
+  if (!import.meta.env.DEV || typeof window === "undefined") return false;
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return true;
+  try {
+    const url = new URL(trimmed);
+    return isLoopbackHost(url.hostname) && isLoopbackHost(window.location.hostname);
+  } catch {
+    return false;
+  }
+}
+
+export const API_BASE_DEFAULT = shouldUseDevProxy(raw)
+  ? ""
+  : (typeof raw === "string" && raw.trim() !== "" ? raw.trim().replace(/\/$/, "") : "");
 
 export const TOPIC_TITLE_SUGGESTION = "A practical lesson from shipping a product with a small team";
 export const CORE_IDEA_SUGGESTION = "Small teams move faster when they reduce scope early and iterate in public.";
@@ -48,17 +67,18 @@ export const DEFAULT_VOICE_PROFILE_ID = "__default_voice_profile__";
 export const DEFAULT_VOICE_PROFILE_LABEL = "Default Voice Profile";
 export const DEFAULT_VOICE_PROFILE_DETAIL = {
   voice_profile_name: DEFAULT_VOICE_PROFILE_LABEL,
-  intended_uses: [
-    "analysis",
-    "educating",
-    "expert",
-    "professional",
-    "witty",
-    "warm and friendly",
-  ],
-  core_voice: "professional, expert, witty, warm and friendly",
-  summary:
-    "A built-in default voice for analysis, education, expert guidance, professional communication, light wit, and warm friendly delivery.",
+  version: {
+    core_voice: "professional, expert, witty, warm and friendly",
+  },
+  tone_baseline: {
+    tone: "professional",
+    energy: "warm and approachable",
+    wit: "light",
+  },
+  style_summary: {
+    summary: "A built-in default voice for analysis, education, expert guidance, professional communication, light wit, and warm friendly delivery.",
+    intended_uses: ["analysis", "educating", "expert", "professional", "witty", "warm and friendly"],
+  },
   do_rules: [
     "Explain clearly and teach practically",
     "Sound expert without sounding cold",

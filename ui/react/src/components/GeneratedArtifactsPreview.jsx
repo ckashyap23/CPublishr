@@ -1,3 +1,5 @@
+import StoredArtifactContent from "./StoredArtifactContent";
+
 export default function GeneratedArtifactsPreview({
   active,
   generatedArtifacts,
@@ -23,7 +25,7 @@ export default function GeneratedArtifactsPreview({
         ))}
       </div>
       {selectedGeneratedArtifact ? (
-        <pre className="content">{JSON.stringify(selectedGeneratedArtifact, null, 2)}</pre>
+        <StoredArtifactContent artifact={selectedGeneratedArtifact} />
       ) : null}
     </>
   );

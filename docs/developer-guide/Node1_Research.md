@@ -130,9 +130,3 @@ Recommended:
 - Output contract unchanged and valid.
 - Node 2 consumes `context.state["research"]` unchanged.
 - External failures degrade gracefully with valid fallback output.
-
----
-
-## Backend Update Reference
-
-Backend-side implemented changes (UI excluded) are tracked in [../../BACKEND_CHANGES.md](../../BACKEND_CHANGES.md).

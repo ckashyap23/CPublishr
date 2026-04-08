@@ -20,8 +20,8 @@ backend/src/           -> FastAPI backend (API, services, models, adapters)
 backend/pyproject.toml -> Backend dependency source of truth
 ui/react/              -> React SPA (Vite)
 docs/                  -> Architecture and team handoff docs
-infra/docker/          -> docker-compose (Postgres, Redis, API)
-backend/contracts/     -> Example request/response JSON contracts
+infra/docker/          -> docker-compose (Postgres + API)
+backend/contracts/examples/ -> Example request/response JSON contracts
 ```
 
 ## Prerequisites
@@ -85,7 +85,9 @@ All protected endpoints require `Authorization: Bearer <token>`.
 | POST | `/nodes/editorial/finalize-selected` | Finalize a selected version |
 | POST | `/nodes/artifacts/generate` | Generate artifacts from latest editorial |
 
-### Artifacts (`/api/v1/artifacts`)
+#Images are generated via **Azure AI / Flux** (configurable; falls back to simulated mode if unconfigured). Videos via Azure Sora. Both support Azure Blob storage for artifact persistence.
+
+## Artifacts (`/api/v1/artifacts`)
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/catalog/formats` | Dynamic format catalog |
@@ -189,6 +191,8 @@ Key environment variables (see `backend/.env.example` for the full list):
 | `CORS_ALLOW_ORIGINS` | Production | Comma-separated allowed frontend origins |
 | `AZURE_OPENAI_ENDPOINT` | LLM features | Azure OpenAI resource URL |
 | `AZURE_OPENAI_SUBSCRIPTION_KEY` | LLM features | Azure OpenAI API key |
+| `AZURE_IMAGE_ENDPOINT` | Image generation | Flux/Azure AI endpoint |
+| `AZURE_API_KEY` | Image generation | Azure AI API key |
 | `VITE_API_BASE_URL` | Frontend | Backend URL (set in `ui/react/.env`) |
 
 ## Design Principles
