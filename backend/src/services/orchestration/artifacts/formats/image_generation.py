@@ -1014,6 +1014,7 @@ class ImageGenerationBuilder:
             original_prompt = self._build_prompt(ctx, style_from_ctx, fmt=fmt)
 
         revised_prompt = (
+            "HARD RULE: Render NO text, letters, words, numbers, captions, labels, watermarks, or typography of any kind anywhere in the image. This rule overrides all other instructions.\n\n"
             "ITERATION REQUEST (apply these changes while preserving the original concept):\n"
             f"{cleaned_instruction}\n\n"
             "ORIGINAL CREATIVE BRIEF:\n"
