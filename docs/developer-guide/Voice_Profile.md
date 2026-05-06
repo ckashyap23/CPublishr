@@ -1,183 +1,94 @@
-# Voice Profile Module - Team Handoff Guide
+# Voice Profiles
 
-This document explains the current voice profile implementation (as built)
+Voice profiles store reusable tone and style guidance derived from a user's content datasets.
 
-## Goal
+## Main Files
 
-Enable each authenticated user to:
-- Create named voice profile collections (with multiple platforms)
-- Generate versioned voice profiles from one or more blob-backed datasets
-- Persist full generated profile JSON + structured fields
-- Track dataset lineage per generated version
-- Activate one version for downstream use
+| Layer | File |
+|-------|------|
+| API endpoints | `backend/src/api/v1/endpoints/voice_profiles.py` |
+| Schemas | `backend/src/schemas/voice_profiles.py` |
+| Service | `backend/src/services/voice_profiles/service.py` |
+| Models | `backend/src/db/models/voice_profile.py` |
+| Repositories | `backend/src/db/repositories/voice_profile_module_repository.py` |
 
-## Current API Surface
+## Runtime Surface
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| POST | `/api/v1/voice-profiles/collections` | Create collection |
-| GET | `/api/v1/voice-profiles/collections` | List collections |
-| GET | `/api/v1/voice-profiles/collections/{id}` | Get collection detail |
-| POST | `/api/v1/voice-profiles/collections/{id}/datasets` | Add dataset |
-| POST | `/api/v1/voice-profiles/collections/{id}/profiles` | Create profile |
-| GET | `/api/v1/voice-profiles/profiles` | List profiles |
-| GET | `/api/v1/voice-profiles/profiles/{id}` | Get profile |
-| POST | `/api/v1/voice-profiles/profiles/{id}/status` | Enable/disable profile |
-| DELETE | `/api/v1/voice-profiles/profiles/{id}` | Delete profile |
-| POST | `/api/v1/voice-profiles/profiles/{id}/versions/generate` | Generate new version |
-| GET | `/api/v1/voice-profiles/versions/{id}` | Get version detail |
-| POST | `/api/v1/voice-profiles/versions/{id}/activate` | Activate version |
-| POST | `/api/v1/voice-profiles/versions/{id}/status` | Update version status |
+Routes are under:
 
-Router source: `backend/src/api/v1/router.py`
+```text
+/api/v1/voice-profiles
+```
 
-## Data Model (Current)
+Core operations:
 
-DB bootstrap currently creates only:
-- `users`
-- `voice_profile_collections`
-- `voice_profile_versions`
-- `voice_profile_version_datasets`
-- `dataset_entries`
+- create/list/get collections
+- add datasets
+- create/list/get profiles
+- generate profile versions
+- activate versions
+- update profile/version status
+- delete profiles
 
-Definition sources:
-- `backend/src/db/models/user.py`
-- `backend/src/db/models/voice_profile_collection.py`
-- `backend/src/db/models/voice_profile_version.py`
-- `backend/src/db/models/voice_profile_version_dataset.py`
-- `backend/src/db/models/dataset_entry.py`
-- `backend/src/db/init_db.py`
+## Data Model
 
-Important implementation details:
-- `users.user_id` is `varchar(64)` (not UUID) and is the auth identity.
-- `voice_profile_collections.user_id` references `users.user_id`.
-- `voice_profile_collections.platforms` is `jsonb` array (multi-platform per collection).
-- `voice_profile_versions` has unique `(voice_profile_id, version_no)`.
-- `voice_profile_version_datasets` has unique `(voice_profile_version_id, dataset_id)`.
-- `dataset_entries.entry_type` is checked against allowed enum values.
+| Table | Purpose |
+|-------|---------|
+| `voice_profile_collections` | Named user-owned profile collection |
+| `voice_profiles` | Profile records within a collection |
+| `voice_profile_datasets` | Dataset metadata and blob/source references |
+| `voice_profile_versions` | Generated versioned profile JSON and status |
+| `voice_profile_version_datasets` | Dataset lineage for each version |
+| `dataset_entries` | Individual normalized source entries |
 
-## End-to-End Backend Flow
+Generated versions include:
 
-### 1) Signup/Login
+- `core_voice`
+- `style_summary`
+- `tone_baseline`
+- `do_rules`
+- `dont_rules`
+- `raw_profile_json`
+- status and activation fields
 
-- Signup requires: `user_id`, `email`, `password`.
-- Login requires: `user_id`, `password`.
-- Signup creates one row in `users` and returns bearer token.
+## Provider Notes
 
-Code:
-- `backend/src/api/v1/endpoints/auth.py`
-- `backend/src/db/repositories/user_repository.py`
+Dataset ingestion currently reads Azure Blob paths configured by:
 
-### 2) Create Voice Profile Collection
+- `AZURE_STORAGE_CONNECTION_STRING`
+- `AZURE_PROFILE_ENTRIES_CONTAINER`
 
-Request:
-- `voice_profile_name` (required)
-- `platforms` (required list, min 1)
+LLM generation uses the shared text LLM provider settings:
 
-Behavior:
-- Creates one row in `voice_profile_collections`.
-- Automatically creates initial version row in `voice_profile_versions` with:
-  - `version_no=1`
-  - `is_active=false`
-  - `generation_status="draft"`
-  - empty structured payload fields
+- `LLM_PROVIDER=azure`
+- `LLM_PROVIDER=openai`
 
-Code:
-- `backend/src/api/v1/endpoints/voice_profiles.py`
-- `backend/src/services/voice_profiles/service.py`
-- `backend/src/db/repositories/voice_profile_module_repository.py`
+If the LLM path fails, the service falls back to conservative profile JSON.
 
-### 3) Generate New Version (Datasets + LLM)
+## Downstream Usage
 
-Request:
-- `intended_use` (optional)
-- `datasets[]` (min 1), each with:
-  - `dataset_id` (optional)
-  - `dataset_name` (required)
-  - `source_profile` (optional)
-  - `blob_prefix` (required)
-  - `sample_scope_note` (optional)
+An active profile can be referenced from project context through `voice_profile_id`.
 
-Behavior:
-1. Ingest blobs from configured Azure container using `blob_prefix`.
-2. Upsert `dataset_entries` for found blobs.
-3. Build generation payload from ingested entries.
-4. Generate profile JSON with Azure OpenAI client (or fallback template if LLM disabled).
-5. Create a new `voice_profile_versions` row with incremented `version_no`.
-6. Upsert lineage rows in `voice_profile_version_datasets` for each dataset.
+The default fallback profile ID is:
 
-Code:
-- `backend/src/services/voice_profiles/service.py`
-- `backend/src/services/llm/azure_openai.py`
-- `backend/src/db/repositories/voice_profile_module_repository.py`
+```text
+__default_voice_profile__
+```
 
-### 4) Approve/Activate/Status
+Use the default profile when users have not configured a custom dataset-backed profile.
 
-- Activate endpoint sets selected version active and marks status approved.
-- Status endpoint supports: `draft`, `generated`, `approved`, `rejected`, `failed`.
+## Implementation Rules
 
-Code:
-- `backend/src/api/v1/endpoints/voice_profiles.py`
-- `backend/src/db/repositories/voice_profile_module_repository.py`
+- Keep generated profile JSON backward-compatible for downstream prompt builders.
+- Preserve dataset lineage when generating a new version.
+- Do not activate rejected or failed versions.
+- Treat source blob/data access errors as user-visible validation failures.
+- Keep service logic separate from API schema definitions.
 
-## Azure Blob Contract
+## Test Checklist
 
-Config keys:
-- `AZURE_STORAGE_CONNECTION_STRING` -> `azure_storage_connection_string`
-- `AZURE_PROFILE_ENTRIES_CONTAINER` -> `azure_profile_entries_container` (default `profile-entries`)
-
-Recommended blob path pattern:
-- `<user_id>/<dataset_name>/<files...>`
-
-The API accepts arbitrary `blob_prefix`, so caller controls dataset scope per generation request.
-
-## UI Coverage (Current)
-
-React app supports:
-- Signup/Login/Logout
-- Collection create/list/select
-- Generate version with one or more dataset input rows
-- Version detail view (raw + structured fields + lineage)
-- Activate version
-- Update generation status
-
-UI source:
-- `ui/react/src/App.jsx`
-
-## Notes: Spec vs Current Implementation
-
-Implemented from spec:
-- User-scoped collections and versions
-- Multi-platform collection model
-- Dataset ingestion from blob
-- Generated version persistence
-- Dataset lineage tracking
-- Activation flow
-
-Current simplifications:
-- Preprocess and generate logic are consolidated in one service (`voice_profiles/service.py`) rather than two physical scripts.
-- `dataset_entries` enrichment fields (`format_family`, `hook_type`, `cta_type`, `theme_tags`) are not fully LLM-enriched yet; initial ingestion writes conservative defaults.
-- `platforms` is currently required at collection create time.
-
-## Operational Notes
-
-- If DB tables are cleared, startup recreates the target schema when `db_auto_create=true`.
-- No users exist after reset until signup is called.
-- First signup inserts first row into `users`.
-
-## File Map (Primary)
-
-- API:
-  - `backend/src/api/v1/endpoints/auth.py`
-  - `backend/src/api/v1/endpoints/voice_profiles.py`
-  - `backend/src/api/v1/router.py`
-- Services:
-  - `backend/src/services/voice_profiles/service.py`
-  - `backend/src/services/llm/azure_openai.py`
-- Persistence:
-  - `backend/src/db/repositories/user_repository.py`
-  - `backend/src/db/repositories/voice_profile_module_repository.py`
-  - `backend/src/db/models/*` (voice profile module tables)
-  - `backend/src/db/init_db.py`
-- UI:
-  - `ui/react/src/App.jsx`
+- Create collection/profile.
+- Add dataset metadata.
+- Generate a version with valid lineage.
+- Activate one version and ensure older active versions are deactivated as needed.
+- Verify fallback/default profile behavior.

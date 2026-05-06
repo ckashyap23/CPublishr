@@ -5,7 +5,7 @@ Thank you for your interest in contributing! Here is everything you need to get 
 ## Getting Started
 
 1. Fork the repository and clone your fork
-2. Follow the setup steps in [DEVELOPMENT.md](DEVELOPMENT.md)
+2. Follow the setup steps in [Development.md](developer-guide/Development.md)
 3. Create a branch for your change: `git checkout -b feat/your-feature-name`
 
 ## Branch Naming
@@ -33,7 +33,7 @@ Thank you for your interest in contributing! Here is everything you need to get 
 
 ## Adding a Platform Adapter
 
-CPublishr supports pluggable platform adapters (LinkedIn, Instagram, etc.). To add a new one, follow the guide in [docs/developer-guide/Generate_Adapter.md](docs/developer-guide/Generate_Adapter.md).
+CPublishr supports pluggable platform adapters (LinkedIn, Instagram, etc.). To add a new one, follow the guide in [Generate_Adapter.md](developer-guide/SolutionUnderstanding/Generate_Adapter.md).
 
 ## Code Style
 

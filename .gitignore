@@ -1,38 +1,95 @@
-# Byte-compiled
+# Python bytecode and caches
 __pycache__/
 *.py[cod]
+*$py.class
 *.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 
-# venv
+# Virtual environments
 .venv/
+.venv*/
 backend/.venv/
+backend/.venv*/
 .venv-ui/
-backend/.venv-bootstrap/
-backend/.venv.broken-*/
 
-# generated artifact outputs (local runs)
-backend/src/services/orchestration/artifacts/formats/text/
-backend/src/services/orchestration/artifacts/formats/images/
-
-# env
+# Environment files and local secrets
 .env
+.env.*
 backend/.env
+backend/.env.*
+ui/react/.env
+ui/react/.env.*
+!.env.example
+!backend/.env.example
+!ui/react/.env.example
+!*/.env.example
 
-# frontend
+# Node / frontend outputs
+node_modules/
 ui/react/node_modules/
 ui/react/dist/
+ui/react/.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# Claude Code memory (private)
-.claude/
+# Local generated artifact outputs
+backend/src/services/orchestration/artifacts/formats/text/
+backend/src/services/orchestration/artifacts/formats/images/
+backend/src/services/orchestration/artifacts/formats/videos/
+backend/src/services/orchestration/artifacts/formats/gifs/
 
-# local tooling / scratch
-.venv_dbinspect/
-scripts/_dbinspect_*.py
-Voiceprofile.md
-
-# private planning docs
-MVP.md
-ProductPlan.md
-
+# Local databases, dumps, and runtime output
+*.sqlite
+*.sqlite3
+*.db
 backend/_db_dump_public.json
 backend/_local_run.db
+backend/local.db
+backend/test.db
+output/
+outputs/
+downloads/
+Publishr/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+*.old
+*.swp
+*.swo
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Private assistant/tooling state
+.claude/
+.venv_dbinspect/
+scripts/_dbinspect_*.py
+
+# Legacy local backups
+ui/streamlit_backup/
+
+# Private planning docs
+MVP.md
+ProductPlan.md
+Voiceprofile.md
+Voiceprofile_v2.md
+voiceprofile_v2.md
+docs/MVP.md
+docs/ProductPlan.md
+docs/Voiceprofile.md
+docs/Voiceprofile_v2.md
+docs/voiceprofile_v2.md
+docs/developer-guide/Voiceprofile.md

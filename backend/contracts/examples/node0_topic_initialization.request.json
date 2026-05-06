@@ -7,5 +7,6 @@
   "audience_familiarity": "somewhat_familiar",
   "detail_level": "practical",
   "tone_preference": "professional",
+  "voice_profile_id": "__default_voice_profile__",
   "distribution_targets": ["linkedin", "x", "medium", "github"]
 }

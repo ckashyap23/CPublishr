@@ -66,6 +66,6 @@ Set backend URL in UI (default is `http://127.0.0.1:8010`).
 
 ---
 
-## Backend Update Reference
+## Backend Reference
 
-Backend-side implemented changes (UI excluded) are tracked in [../../BACKEND_CHANGES.md](../../BACKEND_CHANGES.md).
+Start with [../../docs/developer-guide/SolutionUnderstanding.md](../../docs/developer-guide/SolutionUnderstanding.md) for the current backend workflow and links to detailed implementation guides.

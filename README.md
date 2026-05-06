@@ -33,7 +33,7 @@ backend/contracts/examples/ -> Example request/response JSON contracts
 
 ## Quick Start
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for full cross-platform setup instructions.
+See [Development.md](docs/developer-guide/Development.md) for full cross-platform setup instructions.
 
 ```bash
 # Backend (from backend/)
@@ -166,7 +166,7 @@ All protected endpoints require `Authorization: Bearer <token>`.
 | LinkedIn | Schema + composition + save-to-publish |
 | Instagram | Schema + composition + save-to-publish |
 
-New adapters are auto-discovered via registry. See [docs/developer-guide/Generate_Adapter.md](docs/developer-guide/Generate_Adapter.md).
+New adapters are auto-discovered via registry. See [Generate_Adapter.md](docs/developer-guide/SolutionUnderstanding/Generate_Adapter.md).
 
 ## DB Migrations (Alembic)
 
@@ -178,7 +178,7 @@ cd backend && alembic upgrade head
 cd backend && .\.venv\Scripts\alembic.exe upgrade head
 ```
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for creating new migrations.
+See [Development.md](docs/developer-guide/Development.md) for creating new migrations.
 
 ## Configuration
 
@@ -204,10 +204,10 @@ Key environment variables (see `backend/.env.example` for the full list):
 
 ## Contributing
 
-Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
+Contributions are welcome! Please read [CONTRIBUTING.md](docs/CONTRIBUTING.md) before opening a PR.
 
 ## References
 
-- [docs/solution_understanding.md](docs/solution_understanding.md) - architecture overview
-- [docs/developer-guide/](docs/developer-guide/) - team handoff guides per module
+- [docs/developer-guide/SolutionUnderstanding.md](docs/developer-guide/SolutionUnderstanding.md) - start here for the solution map and links to detailed guides
+- [docs/developer-guide/](docs/developer-guide/) - focused implementation guides per module
 - [ui/react/README.md](ui/react/README.md) - React UI setup
